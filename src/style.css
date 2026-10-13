@@ -1,0 +1,81 @@
+/* Shared tokens and resets. Component-specific styling lives in each .vue. */
+
+:root {
+  --bg: #16140f;
+  --panel: #211e17;
+  --panel-raised: #2b271d;
+  --border: #3d3729;
+  --border-bright: #574e3a;
+
+  --text: #e8dfc8;
+  --muted: #9a9079;
+  --dim: #6b6354;
+
+  --fire: #e8821e;
+  --health: #c0392b;
+  --hunger: #d68910;
+  --sanity: #8e7cc3;
+  --good: #7ba05b;
+  --bad: #c0392b;
+
+  --radius: 4px;
+
+  color-scheme: dark;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 50% 0%, #241f16 0%, var(--bg) 60%);
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+button:hover:not(:disabled) {
+  background: #3a3426;
+  border-color: var(--fire);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+}
+
+.panel-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+}
