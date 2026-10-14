@@ -11,7 +11,7 @@
 export const RULES = {
   meta: {
     /** Survive this many full days to win. */
-    daysToSurvive: 20,
+    daysToSurvive: 28,
     mapWidth: 7,
     mapHeight: 7,
   },
