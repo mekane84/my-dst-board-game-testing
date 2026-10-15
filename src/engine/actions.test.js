@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createGame } from './setup.js'
 import { makeCard } from './state.js'
 import { refillAllHands } from './draw.js'
+import { createGearCard } from './gear.js'
 import {
   startActionRounds,
   selectAction,
@@ -327,25 +328,48 @@ describe('what is not legal yet', () => {
     expect(result.reason).toMatch(/not in your hand/i)
   })
 
-  it('reports Work and Explore as coming later, rather than failing silently', () => {
+  it('reports Explore as coming later, rather than failing silently', () => {
     const state = opened()
-    const gather = plant(state, state.players[0], 'gather')
     const explore = plant(state, state.players[0], 'explore')
-
-    const work = selectAction(state, 'p0', { kind: 'card', uid: gather.uid, mode: 'work' })
-    expect(work.ok).toBe(false)
-    expect(work.reason).toMatch(/phase 4/i)
 
     const exploring = selectAction(state, 'p0', { kind: 'card', uid: explore.uid, mode: 'effect' })
     expect(exploring.ok).toBe(false)
     expect(exploring.reason).toMatch(/phase 5/i)
   })
 
+  it('rejects Work with no target, and unknown targets', () => {
+    const state = opened()
+    const gather = plant(state, state.players[0], 'gather')
+
+    const bare = selectAction(state, 'p0', { kind: 'card', uid: gather.uid, mode: 'work' })
+    expect(bare.ok).toBe(false)
+    expect(bare.reason).toMatch(/work on/i)
+
+    const bogus = selectAction(state, 'p0', {
+      kind: 'card', uid: gather.uid, mode: 'work', work: { type: 'craft', id: 'jetpack' },
+    })
+    expect(bogus.ok).toBe(false)
+    expect(bogus.reason).toMatch(/no such gear/i)
+  })
+
+  it('accepts a well-formed Work selection even when the team cannot afford it', () => {
+    const state = opened()
+    const gather = plant(state, state.players[0], 'gather')
+
+    // Affordability is deliberately checked at RESOLUTION, not selection,
+    // because the other survivor may spend the same resources first.
+    expect(state.resources.wood).toBe(0)
+    const result = selectAction(state, 'p0', {
+      kind: 'card', uid: gather.uid, mode: 'work', work: { type: 'craft', id: 'axe' },
+    })
+    expect(result.ok).toBe(true)
+  })
+
   it('reports action-cost abilities as coming later', () => {
     const state = opened()
     const result = selectAction(state, 'p0', { kind: 'ability', source: 'gear', id: 'small_campfire' })
     expect(result.ok).toBe(false)
-    expect(result.reason).toMatch(/phase 4/i)
+    expect(result.reason).toMatch(/phase 7/i)
   })
 })
 
@@ -395,5 +419,198 @@ describe('passing', () => {
     })
 
     expect(state.log.some((e) => e.type === 'pass' && e.playerId === 'p0')).toBe(true)
+  })
+})
+
+describe('Axe and Pickaxe modify a Gather', () => {
+  it('adds its bonus to a Camp Gather of the matching resource', () => {
+    const state = opened()
+    const axe = createGearCard(state, 'axe')
+    state.players[0].readyGear.push(axe)
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'effect', options: { resource: 'wood', gearUid: axe.uid } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    expect(state.resources.wood).toBe(2)
+  })
+
+  it('refuses to help with a resource it has nothing to do with', () => {
+    const state = opened()
+    const axe = createGearCard(state, 'axe')
+    state.players[0].readyGear.push(axe)
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+    selectAction(state, 'p0', {
+      kind: 'card', uid: a.uid, mode: 'effect', options: { resource: 'grass', gearUid: axe.uid },
+    })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'effect' })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+
+    const result = resolveNextAction(state)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/only helps when gathering wood/i)
+    expect(state.resources.grass).toBe(0)
+  })
+
+  it('is exhausted for the Day once used', () => {
+    const state = opened()
+    const axe = createGearCard(state, 'axe')
+    state.players[0].readyGear.push(axe)
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'effect', options: { resource: 'wood', gearUid: axe.uid } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    expect(state.players[0].readyGear).toEqual([])
+    expect(state.players[0].usedGear.map((c) => c.uid)).toEqual([axe.uid])
+  })
+
+  it('lets two Axes pay off across two Gathers, never on one', () => {
+    // RESOLVED 2026-10-14: the once-per-Day limit is per card, but only one
+    // Axe may modify a single Gather.
+    const state = opened()
+    const p0 = state.players[0]
+    const axeOne = createGearCard(state, 'axe')
+    const axeTwo = createGearCard(state, 'axe')
+    p0.readyGear.push(axeOne, axeTwo)
+
+    const g1 = plant(state, p0, 'gather')
+    const r1 = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: g1.uid, mode: 'effect', options: { resource: 'wood', gearUid: axeOne.uid } },
+      p1: { kind: 'card', uid: r1.uid, mode: 'effect' },
+    })
+    expect(state.resources.wood).toBe(2)
+
+    advanceRound(state)
+
+    const g2 = plant(state, p0, 'gather')
+    const r2 = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: g2.uid, mode: 'effect', options: { resource: 'wood', gearUid: axeTwo.uid } },
+      p1: { kind: 'card', uid: r2.uid, mode: 'effect' },
+    })
+
+    expect(state.resources.wood).toBe(4)
+  })
+})
+
+describe('Spear and Torch modify a Prepare', () => {
+  it('replaces the Prepare total rather than adding to it', () => {
+    const state = opened()
+    const spear = createGearCard(state, 'spear')
+    state.players[0].readyGear.push(spear)
+
+    const a = plant(state, state.players[0], 'prepare')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'effect', options: { choice: 'combat', gearUid: spear.uid } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    // "that Prepare provides 3 Combat total instead of 1" -- not 1 + 3.
+    expect(state.tonight.combat).toBe(3)
+    expect(spear.uses).toBe(1)
+  })
+
+  it('refuses the wrong kind of Prepare', () => {
+    const state = opened()
+    const spear = createGearCard(state, 'spear')
+    state.players[0].readyGear.push(spear)
+
+    const a = plant(state, state.players[0], 'prepare')
+    const b = plant(state, state.players[1], 'recover')
+    selectAction(state, 'p0', {
+      kind: 'card', uid: a.uid, mode: 'effect', options: { choice: 'protection', gearUid: spear.uid },
+    })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'effect' })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+
+    const result = resolveNextAction(state)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/only modifies a combat prepare/i)
+    expect(state.tonight.protection).toBe(0)
+  })
+
+  it('upgrades a Protection Prepare with a Torch', () => {
+    const state = opened()
+    const torch = createGearCard(state, 'torch')
+    state.players[0].readyGear.push(torch)
+
+    const a = plant(state, state.players[0], 'prepare')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'effect', options: { choice: 'protection', gearUid: torch.uid } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    expect(state.tonight.protection).toBe(3)
+  })
+})
+
+describe('Work resolves crafting and building', () => {
+  it('crafts Gear, which is Ready the same Day', () => {
+    const state = opened()
+    state.resources.wood = 1
+    state.resources.flint = 1
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'work', work: { type: 'craft', id: 'axe' } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    expect(state.players[0].readyGear.map((c) => c.cardId)).toEqual(['axe'])
+    expect(state.resources.wood).toBe(0)
+  })
+
+  it('builds a Camp Improvement', () => {
+    const state = opened()
+    state.resources.wood = 3
+    state.resources.flint = 2
+
+    const a = plant(state, state.players[0], 'explore')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'work', work: { type: 'build', id: 'fire_pit' } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    // An Explore card spent as Work: any starter card can be Work.
+    expect(state.camp.improvements.fire_pit).toBeDefined()
+  })
+
+  it('lets resolution order decide who gets the last of a resource', () => {
+    const state = opened()
+    state.resources.wood = 1
+    state.resources.flint = 1
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'gather')
+
+    selectAction(state, 'p0', { kind: 'card', uid: a.uid, mode: 'work', work: { type: 'craft', id: 'axe' } })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'work', work: { type: 'craft', id: 'pickaxe' } })
+    revealSelections(state)
+    setResolutionOrder(state, ['p1', 'p0'])
+
+    // Both selections were legal; only the first to resolve can afford it.
+    expect(resolveNextAction(state).ok).toBe(true)
+    const second = resolveNextAction(state)
+
+    expect(second.ok).toBe(false)
+    expect(second.reason).toMatch(/missing/i)
+    expect(state.players[1].readyGear.map((c) => c.cardId)).toEqual(['pickaxe'])
+    expect(state.players[0].readyGear).toEqual([])
   })
 })

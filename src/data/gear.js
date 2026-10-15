@@ -23,6 +23,8 @@ export const GEAR = [
     cost: { wood: 1, flint: 1 },
     text: 'Once per Day when you Gather Wood, gain +1 Wood.',
     modifies: 'gather',
+    /** Applies to Camp Gather as well as Location Gather (RESOLVED 2026-10-14). */
+    gatherBonus: { resource: 'wood', amount: 1 },
   },
   {
     id: 'pickaxe',
@@ -31,6 +33,7 @@ export const GEAR = [
     cost: { wood: 1, flint: 1 },
     text: 'Once per Day when you Gather Flint, gain +1 Flint.',
     modifies: 'gather',
+    gatherBonus: { resource: 'flint', amount: 1 },
   },
   {
     id: 'trap',
@@ -90,6 +93,8 @@ export const GEAR = [
     cost: { wood: 2, flint: 1 },
     text: 'Use with one Combat Prepare: that Prepare provides 3 Combat total instead of 1. May also satisfy Location effects that explicitly require a Spear, spending 1 use.',
     modifies: 'prepare',
+    /** Replaces the Prepare's output rather than adding to it. */
+    prepareBonus: { choice: 'combat', total: 3 },
   },
   {
     id: 'torch',
@@ -99,6 +104,7 @@ export const GEAR = [
     cost: { wood: 1, grass: 2 },
     text: 'Use with one Protection Prepare: that Prepare provides 3 Protection total instead of 1. May also satisfy Location effects that call for light, spending 1 use.',
     modifies: 'prepare',
+    prepareBonus: { choice: 'protection', total: 3 },
   },
   {
     id: 'log_suit',
@@ -142,6 +148,12 @@ export const GEAR_BY_ID = Object.fromEntries(GEAR.map((g) => [g.id, g]))
 
 /** Gear whose effect fires the moment it is drawn and readied. */
 export const ON_DRAW_GEAR = GEAR.filter((g) => g.onDraw).map((g) => g.id)
+
+/** Gear that can modify a Gather, keyed by the resource it boosts. */
+export const GATHER_MODIFIERS = GEAR.filter((g) => g.gatherBonus)
+
+/** Gear that can modify a Prepare, keyed by the choice it upgrades. */
+export const PREPARE_MODIFIERS = GEAR.filter((g) => g.prepareBonus)
 
 export function isTwoUse(gearId) {
   const gear = GEAR_BY_ID[gearId]

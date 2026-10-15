@@ -12,6 +12,7 @@ import { shuffle } from './rng.js'
 import { makeCard } from './state.js'
 import { logEvent } from './setup.js'
 import { GEAR_BY_ID } from '../data/gear.js'
+import { removeFear } from './gear.js'
 import { FEAR_CARD } from '../data/starterCards.js'
 
 /** Safety valve: a malformed deck must fail loudly, not hang the browser. */
@@ -113,8 +114,14 @@ export function refillHand(state, player) {
       }
     }
 
-    // Top Hat's on-draw Fear removal is wired up in Phase 4, where Fear
-    // removal across zones is implemented.
+    if (gear?.onDraw === 'removeFear') {
+      // Top Hat: removes from hand, played area or discard -- never the draw
+      // pile, which no effect may search. It stays Ready rather than moving to
+      // the used area: the trigger is automatic, not an action, and it has no
+      // other use to spend. Both zones discard at cleanup, so nothing differs
+      // mechanically.
+      removeFear(state, player, 1, { source: 'Top Hat' })
+    }
   }
 
   logEvent(state, 'draw', `${player.name} drew ${drawnToHand.length} cards.`, {

@@ -8,6 +8,8 @@ import { NIGHT_CARDS, RED_MOON, thresholdValue } from '../data/nights.js'
 import { LOCATIONS } from '../data/locations.js'
 import { STARTER_CARDS } from '../data/starterCards.js'
 import { GEAR_BY_ID } from '../data/gear.js'
+import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
+import { majorImprovementCount } from '../engine/crafting.js'
 import ActionRound from './ActionRound.vue'
 
 /**
@@ -58,6 +60,21 @@ function cardLabel(card) {
   if (card.kind === 'fear') return 'Fear'
   return GEAR_BY_ID[card.cardId]?.name ?? STARTER_CARDS[card.cardId]?.name ?? card.cardId
 }
+
+/** Gear label carrying its remaining durability, for the two-use family. */
+function gearLabel(card) {
+  const name = GEAR_BY_ID[card.cardId]?.name ?? card.cardId
+  return card.uses === undefined ? name : `${name} (${card.uses})`
+}
+
+const camp = computed(() => {
+  const g = game.value
+  return {
+    major: Object.keys(g.camp.improvements).map((id) => BUILDABLE_BY_ID[id]?.name ?? id),
+    majorCount: majorImprovementCount(g),
+    food: g.camp.foodSources.map((f) => BUILDABLE_BY_ID[f.id]?.name ?? f.id),
+  }
+})
 
 function stats(player) {
   return {
@@ -169,7 +186,13 @@ function exportState() {
           <div class="row">
             <span class="tag gear">ready gear {{ p.readyGear.length }}</span>
             <span v-if="!p.readyGear.length" class="muted small">&mdash;</span>
-            <span v-for="c in p.readyGear" :key="c.uid" class="card gear">{{ cardLabel(c) }}</span>
+            <span v-for="c in p.readyGear" :key="c.uid" class="card gear">{{ gearLabel(c) }}</span>
+          </div>
+
+          <div v-if="p.usedGear.length || p.removed.length" class="row">
+            <span class="tag">spent</span>
+            <span v-for="c in p.usedGear" :key="c.uid" class="card used">{{ gearLabel(c) }}</span>
+            <span v-for="c in p.removed" :key="c.uid" class="card broken">{{ cardLabel(c) }}</span>
           </div>
 
           <div class="playable">
@@ -184,7 +207,19 @@ function exportState() {
       </section>
 
       <section class="panel">
-        <h2>Night schedule</h2>
+        <h2>Camp &mdash; {{ camp.majorCount }} of 4 major improvements</h2>
+        <div class="row">
+          <span class="tag">major</span>
+          <span v-if="!camp.major.length" class="muted small">none built</span>
+          <span v-for="name in camp.major" :key="name" class="card major">{{ name }}</span>
+        </div>
+        <div class="row">
+          <span class="tag">food</span>
+          <span v-if="!camp.food.length" class="muted small">none built</span>
+          <span v-for="(name, i) in camp.food" :key="i" class="card food">{{ name }}</span>
+        </div>
+
+        <h2 class="spaced">Night schedule</h2>
         <table>
           <tbody>
             <tr v-for="n in schedule" :key="n.day" :class="{ current: n.day === game.day }">
@@ -291,6 +326,10 @@ tr.current td { background: #262a33; }
 }
 .card.fear { color: #d9776b; border-color: #553c38; }
 .card.gear { color: var(--accent); border-color: #5a4426; }
+.card.used { color: var(--muted); opacity: 0.7; }
+.card.broken { color: #8a6a66; text-decoration: line-through; }
+.card.major { color: var(--accent); border-color: #5a4426; }
+.card.food { color: var(--good); border-color: #3f5436; }
 
 .mini { padding: 0.1rem 0.35rem; font-size: 0.68rem; }
 .playable { font-size: 0.72rem; color: var(--good); margin-top: 0.2rem; }

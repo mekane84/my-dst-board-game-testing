@@ -12,30 +12,98 @@ import {
   legalSelections,
   describeSelection,
 } from '../engine/actions.js'
+import { workOptions } from '../engine/crafting.js'
+import { GEAR_BY_ID, isTwoUse } from '../data/gear.js'
 
 const props = defineProps({ game: { type: Object, required: true } })
 const emit = defineEmits(['dayComplete'])
 
-/** Which card is expanded to show its sub-options, as `${playerId}:${uid}`. */
+/** `${playerId}:${uid}` of the card whose options are showing. */
 const expanded = ref(null)
+/** True while the expanded card is showing Work targets instead of its effect. */
+const workMode = ref(false)
 const error = ref('')
 
 const round = computed(() => props.game.round)
 const phase = computed(() => round.value.phase)
 const everyoneLocked = computed(() => allSelected(props.game))
 
-/** Cards needing a follow-up choice before they can be selected. */
-const NEEDS_OPTION = {
-  gather: (game) => game.constants.gather.campResources.map((r) => ({ key: 'resource', value: r, label: r })),
-  prepare: () => [
-    { key: 'choice', value: 'combat', label: '+1 Combat' },
-    { key: 'choice', value: 'protection', label: '+1 Protection' },
-  ],
+function run(fn) {
+  const result = fn()
+  error.value = result && result.ok === false ? result.reason : ''
+  return result
 }
 
-function optionsFor(cardId) {
-  return NEEDS_OPTION[cardId]?.(props.game) ?? null
+/* -------------------------------------------------- modifier lookup */
+
+/** A Ready Gear card that could boost this Gather, if the player has one. */
+function gatherModifier(player, resource) {
+  return player.readyGear.find((c) => {
+    const gear = GEAR_BY_ID[c.cardId]
+    return gear?.gatherBonus?.resource === resource && (!isTwoUse(c.cardId) || c.uses > 0)
+  })
 }
+
+/** A Ready Spear or Torch that could upgrade this Prepare. */
+function prepareModifier(player, choice) {
+  return player.readyGear.find((c) => {
+    const gear = GEAR_BY_ID[c.cardId]
+    return gear?.prepareBonus?.choice === choice && (!isTwoUse(c.cardId) || c.uses > 0)
+  })
+}
+
+function gearName(card) {
+  return GEAR_BY_ID[card.cardId]?.name ?? card.cardId
+}
+
+/** The ways this card's printed effect can be resolved right now. */
+function effectChoices(player, entry) {
+  if (entry.cardId === 'gather') {
+    return props.game.constants.gather.campResources.flatMap((resource) => {
+      const rows = [{ label: resource, options: { resource } }]
+      const mod = gatherModifier(player, resource)
+      if (mod) {
+        const bonus = GEAR_BY_ID[mod.cardId].gatherBonus.amount
+        rows.push({
+          label: `${resource} +${bonus} (${gearName(mod)})`,
+          boosted: true,
+          options: { resource, gearUid: mod.uid },
+        })
+      }
+      return rows
+    })
+  }
+
+  if (entry.cardId === 'prepare') {
+    return ['combat', 'protection'].flatMap((choice) => {
+      const rows = [{ label: `+1 ${choice}`, options: { choice } }]
+      const mod = prepareModifier(player, choice)
+      if (mod) {
+        const total = GEAR_BY_ID[mod.cardId].prepareBonus.total
+        rows.push({
+          label: `+${total} ${choice} (${gearName(mod)})`,
+          boosted: true,
+          options: { choice, gearUid: mod.uid },
+        })
+      }
+      return rows
+    })
+  }
+
+  return [{ label: 'Resolve', options: {} }]
+}
+
+function workChoices(player) {
+  return workOptions(props.game, player)
+}
+
+function costText(cost) {
+  return Object.entries(cost)
+    .map(([r, n]) => `${n} ${r}`)
+    .join(', ')
+}
+
+/* -------------------------------------------------- selection flow */
 
 function handFor(player) {
   return legalSelections(props.game, player)
@@ -45,34 +113,37 @@ function selectionOf(playerId) {
   return round.value.selections[playerId]
 }
 
-/** Runs an engine call and surfaces its rejection reason, if any. */
-function run(fn) {
-  const result = fn()
-  error.value = result && result.ok === false ? result.reason : ''
-  return result
+function keyFor(player, entry) {
+  return `${player.id}:${entry.uid}`
 }
 
-function pick(player, entry) {
-  const options = optionsFor(entry.cardId)
-  const key = `${player.id}:${entry.uid}`
-
-  if (options && expanded.value !== key) {
-    expanded.value = key
-    return
-  }
-
-  expanded.value = null
-  run(() => selectAction(props.game, player.id, { kind: 'card', uid: entry.uid, mode: 'effect' }))
+function toggleCard(player, entry) {
+  const key = keyFor(player, entry)
+  workMode.value = false
+  expanded.value = expanded.value === key ? null : key
 }
 
-function pickWithOption(player, entry, option) {
+function chooseEffect(player, entry, choice) {
   expanded.value = null
   run(() =>
     selectAction(props.game, player.id, {
       kind: 'card',
       uid: entry.uid,
       mode: 'effect',
-      options: { [option.key]: option.value },
+      options: choice.options,
+    }),
+  )
+}
+
+function chooseWork(player, entry, target) {
+  expanded.value = null
+  workMode.value = false
+  run(() =>
+    selectAction(props.game, player.id, {
+      kind: 'card',
+      uid: entry.uid,
+      mode: 'work',
+      work: { type: target.kind, id: target.id },
     }),
   )
 }
@@ -85,22 +156,15 @@ function passFor(playerId) {
   run(() => selectAction(props.game, playerId, { kind: 'pass' }))
 }
 
-function reveal() {
-  run(() => revealSelections(props.game))
-}
+/* -------------------------------------------------- round flow */
 
-function chooseOrder(order) {
-  run(() => setResolutionOrder(props.game, order))
-}
-
-function resolveOne() {
-  run(() => resolveNextAction(props.game))
-}
+function reveal() { run(() => revealSelections(props.game)) }
+function chooseOrder(order) { run(() => setResolutionOrder(props.game, order)) }
+function resolveOne() { run(() => resolveNextAction(props.game)) }
 
 function resolveAll() {
   while (!roundComplete(props.game)) {
-    const result = run(() => resolveNextAction(props.game))
-    if (!result.ok) break
+    if (!run(() => resolveNextAction(props.game)).ok) break
   }
 }
 
@@ -139,49 +203,69 @@ function nameOf(id) {
         <div class="pick-head">
           <strong>{{ p.name }}</strong>
           <span v-if="selectionOf(p.id)" class="locked">locked in</span>
+          <button v-if="selectionOf(p.id)" class="mini" @click="unlock(p.id)">Change</button>
         </div>
 
-        <div v-if="selectionOf(p.id)" class="row">
-          <span class="muted small">hidden until reveal</span>
-          <button class="mini" @click="unlock(p.id)">Change</button>
-        </div>
+        <div v-if="selectionOf(p.id)" class="muted small">hidden until reveal</div>
 
-        <div v-else class="row wrap">
-          <template v-for="entry in handFor(p)" :key="entry.uid">
+        <template v-else>
+          <div class="row wrap">
             <button
+              v-for="entry in handFor(p)"
+              :key="entry.uid"
               class="mini"
-              :class="{ dim: !entry.available }"
+              :class="{ dim: !entry.available, open: expanded === keyFor(p, entry) }"
               :disabled="!entry.available"
               :title="entry.reason || ''"
-              @click="pick(p, entry)"
-            >
-              {{ entry.name || entry.cardId }}
-            </button>
+              @click="toggleCard(p, entry)"
+            >{{ entry.name || entry.cardId }}</button>
 
-            <span
-              v-if="expanded === `${p.id}:${entry.uid}`"
-              class="options"
-            >
-              <button
-                v-for="opt in optionsFor(entry.cardId)"
-                :key="opt.value"
-                class="mini opt"
-                @click="pickWithOption(p, entry, opt)"
-              >{{ opt.label }}</button>
-            </span>
+            <button
+              v-if="!handFor(p).some((e) => e.available)"
+              class="mini"
+              @click="passFor(p.id)"
+            >Pass</button>
+          </div>
+
+          <!-- Expanded card: its effect options, or its Work targets -->
+          <template v-for="entry in handFor(p)" :key="`x-${entry.uid}`">
+            <div v-if="expanded === keyFor(p, entry)" class="expand">
+              <template v-if="!workMode">
+                <span class="tag">effect</span>
+                <button
+                  v-for="choice in effectChoices(p, entry)"
+                  :key="choice.label"
+                  class="mini opt"
+                  :class="{ boosted: choice.boosted }"
+                  @click="chooseEffect(p, entry, choice)"
+                >{{ choice.label }}</button>
+                <button class="mini work" @click="workMode = true">Work instead &rarr;</button>
+              </template>
+
+              <template v-else>
+                <span class="tag">work</span>
+                <button class="mini" @click="workMode = false">&larr; back</button>
+                <div class="work-grid">
+                  <button
+                    v-for="target in workChoices(p)"
+                    :key="target.id"
+                    class="mini work-item"
+                    :class="{ dim: !target.available, major: target.family === 'major' }"
+                    :disabled="!target.available"
+                    :title="target.reason || ''"
+                    @click="chooseWork(p, entry, target)"
+                  >
+                    <span>{{ target.name }}</span>
+                    <span class="cost">{{ costText(target.cost) }}</span>
+                  </button>
+                </div>
+              </template>
+            </div>
           </template>
-
-          <button
-            v-if="!handFor(p).some((e) => e.available)"
-            class="mini"
-            @click="passFor(p.id)"
-          >Pass</button>
-        </div>
+        </template>
       </div>
 
-      <button class="primary" :disabled="!everyoneLocked" @click="reveal">
-        Reveal both
-      </button>
+      <button class="primary" :disabled="!everyoneLocked" @click="reveal">Reveal both</button>
     </div>
 
     <!-- REVEALED -------------------------------------------------- -->
@@ -252,8 +336,30 @@ h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color:
 
 .mini { padding: 0.15rem 0.4rem; font-size: 0.72rem; }
 .mini.dim { opacity: 0.35; }
-.opt { border-color: var(--accent); color: var(--accent); }
-.options { display: inline-flex; gap: 0.2rem; margin-right: 0.3rem; }
+.mini.open { border-color: var(--accent); color: var(--accent); }
+
+.expand {
+  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+  margin-top: 0.35rem; padding: 0.4rem 0.5rem;
+  background: #1a1c22; border: 1px solid var(--border); border-radius: 3px;
+}
+
+.tag {
+  font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin-right: 0.2rem;
+}
+
+.opt { border-color: #44485a; }
+.opt.boosted { border-color: var(--accent); color: var(--accent); }
+.work { margin-left: auto; border-color: #44485a; }
+
+.work-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.25rem; width: 100%; margin-top: 0.3rem;
+}
+.work-item { display: flex; justify-content: space-between; gap: 0.5rem; text-align: left; }
+.work-item.major { border-left: 2px solid var(--accent); }
+.cost { color: var(--muted); font-size: 0.66rem; white-space: nowrap; }
 
 .primary { align-self: flex-start; border-color: var(--accent); color: var(--accent); }
 

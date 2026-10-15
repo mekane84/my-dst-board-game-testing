@@ -15,6 +15,11 @@
 import { logEvent } from './setup.js'
 import { moveCard, createRound } from './state.js'
 import { STARTER_CARDS } from '../data/starterCards.js'
+import { GEAR_BY_ID } from '../data/gear.js'
+import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
+import { readyGearById, useGear } from './gear.js'
+import { craftGear, buildStructure } from './crafting.js'
+import { healHealth } from './survivor.js'
 
 const ok = (extra = {}) => ({ ok: true, ...extra })
 const fail = (reason) => ({ ok: false, reason })
@@ -165,7 +170,9 @@ function validateSelection(state, player, selection) {
   }
 
   if (selection.kind === 'ability') {
-    return fail('Action-cost Gear and Camp abilities arrive in Phase 4.')
+    // Small Campfire, Tent, and Garland's second use all cost an action
+    // rather than a starter card. They land in Phase 7 with Fear management.
+    return fail('Action-cost Gear and Camp abilities arrive in Phase 7.')
   }
 
   if (selection.kind !== 'card') return fail(`Unknown selection kind: ${selection.kind}`)
@@ -175,7 +182,19 @@ function validateSelection(state, player, selection) {
   if (card.kind === 'fear') return fail('Fear has no effect and cannot be used as Work.')
 
   if (selection.mode === 'work') {
-    return fail('Crafting and building arrive in Phase 4.')
+    // Deliberately lenient: this only checks the Work target exists. Whether
+    // the team can AFFORD it is checked at resolution, because the other
+    // survivor's action may resolve first and spend the same resources. That
+    // is exactly why the team gets to choose the resolution order.
+    const work = selection.work
+    if (!work || typeof work !== 'object') return fail('Choose something to Work on.')
+    if (work.type === 'craft') {
+      return GEAR_BY_ID[work.id] ? ok() : fail(`No such Gear: ${work.id}`)
+    }
+    if (work.type === 'build') {
+      return BUILDABLE_BY_ID[work.id] ? ok() : fail(`No such structure: ${work.id}`)
+    }
+    return fail(`Unknown Work type: ${work.type}`)
   }
   if (selection.mode !== 'effect') return fail(`Unknown mode: ${selection.mode}`)
 
@@ -258,13 +277,23 @@ function applySelection(state, player, selection) {
   const card = player.hand.find((c) => c.uid === selection.uid)
   if (!card) return fail('That card is no longer in hand.')
 
-  const handler = HANDLERS[card.cardId]
-  const result = handler.resolve(state, player, selection.options ?? {})
+  const result =
+    selection.mode === 'work'
+      ? applyWork(state, player, selection.work)
+      : HANDLERS[card.cardId].resolve(state, player, selection.options ?? {})
+
   if (!result.ok) return result
 
   // Played cards sit in `played` until end-of-Day cleanup sweeps them away.
   moveCard(player, card.uid, 'hand', 'played')
   return ok()
+}
+
+/** Any starter card may be spent as Work instead of its printed effect. */
+function applyWork(state, player, work) {
+  if (work.type === 'craft') return craftGear(state, player, work.id)
+  if (work.type === 'build') return buildStructure(state, player, work.id, work.options ?? {})
+  return fail(`Unknown Work type: ${work.type}`)
 }
 
 /* ------------------------------------------------------------------ */
@@ -297,11 +326,32 @@ const HANDLERS = {
         return fail(`${options.resource} cannot be gathered at Camp.`)
       }
 
-      state.resources[options.resource] += campYield
-      logEvent(state, 'gather', `${player.name} gathered ${campYield} ${options.resource} at Camp.`, {
+      let amount = campYield
+
+      // At most ONE Gear of a given type may modify a single Gather
+      // (RESOLVED 2026-10-14). Using it moves it out of Ready Gear, which is
+      // what enforces once-per-Day per card.
+      if (options.gearUid) {
+        const card = readyGearById(player, options.gearUid)
+        if (!card) return fail('That Gear is not Ready. It may already have been used this Day.')
+
+        const gear = GEAR_BY_ID[card.cardId]
+        if (!gear?.gatherBonus) return fail(`${gear?.name ?? 'That Gear'} does not modify a Gather.`)
+        if (gear.gatherBonus.resource !== options.resource) {
+          return fail(`${gear.name} only helps when gathering ${gear.gatherBonus.resource}.`)
+        }
+
+        const used = useGear(state, player, options.gearUid, { reason: 'Gather bonus' })
+        if (!used.ok) return used
+        amount += gear.gatherBonus.amount
+      }
+
+      state.resources[options.resource] += amount
+      logEvent(state, 'gather', `${player.name} gathered ${amount} ${options.resource} at Camp.`, {
         playerId: player.id,
         resource: options.resource,
-        amount: campYield,
+        amount,
+        modified: Boolean(options.gearUid),
       })
       return ok()
     },
@@ -329,11 +379,30 @@ const HANDLERS = {
         return fail('Choose +1 Combat or +1 Protection.')
       }
 
-      // Spear and Torch modify this in Phase 4.
-      state.tonight[choice] += 1
-      logEvent(state, 'prepare', `${player.name} prepared +1 ${choice} for tonight.`, {
+      let amount = 1
+
+      // Spear and Torch REPLACE the Prepare's output rather than adding to it:
+      // "that Prepare provides 3 Combat total instead of 1."
+      if (options.gearUid) {
+        const card = readyGearById(player, options.gearUid)
+        if (!card) return fail('That Gear is not Ready. It may already have been used this Day.')
+
+        const gear = GEAR_BY_ID[card.cardId]
+        if (!gear?.prepareBonus) return fail(`${gear?.name ?? 'That Gear'} does not modify a Prepare.`)
+        if (gear.prepareBonus.choice !== choice) {
+          return fail(`${gear.name} only modifies a ${gear.prepareBonus.choice} Prepare.`)
+        }
+
+        const used = useGear(state, player, options.gearUid, { reason: 'Prepare modifier' })
+        if (!used.ok) return used
+        amount = gear.prepareBonus.total
+      }
+
+      state.tonight[choice] += amount
+      logEvent(state, 'prepare', `${player.name} prepared +${amount} ${choice} for tonight.`, {
         playerId: player.id,
         choice,
+        amount,
         total: state.tonight[choice],
       })
       return ok()
@@ -345,20 +414,13 @@ const HANDLERS = {
       return ok()
     },
     resolve(state, player) {
-      const { maxHealth } = state.constants.survivor
-      const before = player.health
-      player.health = Math.min(maxHealth, player.health + 1)
-      const healed = player.health - before
-
       // Lean-To's "first healing Recover each Day" bonus hooks in at Phase 7.
-      logEvent(
-        state,
-        'recover',
-        healed > 0
-          ? `${player.name} recovered ${healed} Health (now ${player.health}).`
-          : `${player.name} used Recover at full Health and healed nothing.`,
-        { playerId: player.id, healed, health: player.health },
-      )
+      const result = healHealth(state, player, 1, { source: 'Recover' })
+      logEvent(state, 'recover', `${player.name} used Recover.`, {
+        playerId: player.id,
+        healed: result.healed,
+        health: player.health,
+      })
       return ok()
     },
   },
