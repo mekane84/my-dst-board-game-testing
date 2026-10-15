@@ -140,3 +140,6 @@ A tester can:
 - **Do not `git commit` or `git push`.** Leave work uncommitted for review.
 - Build in small vertical slices; keep tests green after each.
 - A phase is not "done" until the designer has tested it.
+- **Do not propose balance tweaks until the game is playable end to end.**
+  Rules questions and genuine ambiguities are always worth raising; opinions
+  about costs and yields wait until there is something to play and simulate.

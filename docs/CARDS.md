@@ -84,6 +84,10 @@ Cost: **2 Grass**
 
 Gear replacement rules still apply to that draw.
 
+**RESOLVED 2026-10-14:** Maximum **1 extra hand card per Day** regardless of how
+many Backpacks are Ready. A second Backpack readied the same Day grants nothing
+further.
+
 ## Map — LOCKED
 
 Cost: **1 Grass + 1 Flint**

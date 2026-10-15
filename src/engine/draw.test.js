@@ -141,7 +141,7 @@ describe('Backpack', () => {
     expect(p.readyGear.map((c) => c.cardId)).toEqual(['backpack', 'axe'])
   })
 
-  it('stacks to 7 with two Backpacks under the current assumption', () => {
+  it('caps the bonus at one extra card, however many Backpacks are Ready', () => {
     const { state, p } = game()
     stackDeck(state, p, [
       'backpack', 'backpack',
@@ -150,14 +150,28 @@ describe('Backpack', () => {
 
     refillHand(state, p)
 
-    expect(p.hand).toHaveLength(7)
+    // Both Backpacks ready, but the hand stops at 6.
+    expect(p.readyGear).toHaveLength(2)
+    expect(p.hand).toHaveLength(6)
   })
 
-  it('caps at one extra card when stacking is turned off', () => {
-    const constants = structuredClone(CONSTANTS)
-    constants.draw.extraCardStacks = false
+  it('logs the bonus only once when a second Backpack adds nothing', () => {
+    const { state, p } = game()
+    stackDeck(state, p, [
+      'backpack', 'backpack',
+      'gather', 'gather', 'explore', 'prepare', 'recover', 'gather', 'explore',
+    ])
 
-    const state = createGame({ seed: 'no-stack', constants })
+    refillHand(state, p)
+
+    expect(state.log.filter((e) => e.type === 'draw-bonus')).toHaveLength(1)
+  })
+
+  it('can be made to stack again by flipping the constant', () => {
+    const constants = structuredClone(CONSTANTS)
+    constants.draw.extraCardStacks = true
+
+    const state = createGame({ seed: 'stacking', constants })
     const p = state.players[0]
     stackDeck(state, p, [
       'backpack', 'backpack',
@@ -166,7 +180,7 @@ describe('Backpack', () => {
 
     refillHand(state, p)
 
-    expect(p.hand).toHaveLength(6)
+    expect(p.hand).toHaveLength(7)
   })
 })
 

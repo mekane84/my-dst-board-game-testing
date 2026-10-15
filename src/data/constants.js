@@ -61,14 +61,13 @@ export const CONSTANTS = {
     /** Extra hand cards a Backpack grants when drawn and readied. */
     extraCardPerBackpack: 1,
     /**
-     * ASSUMPTION 2026-10-14 -- needs a designer ruling.
+     * RESOLVED 2026-10-14: the bonus is capped at one extra card per Day no
+     * matter how many Backpacks are Ready. A second Backpack adds nothing that
+     * Day, which keeps hand size from drifting upward for 2 Grass a copy.
      *
-     * Two Backpacks drawn the same Day each grant their card, for a hand of 7.
-     * Nothing in the rules forbids it, and the 'max 1 modifier per action' rule
-     * does not apply here because drawing is not an action. Set false to cap
-     * the bonus at one card per Day regardless of how many Backpacks are Ready.
+     * Set true to let them stack instead.
      */
-    extraCardStacks: true,
+    extraCardStacks: false,
   },
 
   /**
