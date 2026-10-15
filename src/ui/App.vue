@@ -1,32 +1,35 @@
 <script setup>
-import { computed, ref, shallowRef } from 'vue'
-import { createGame } from '../engine/setup.js'
+import { computed, ref } from 'vue'
+import { createGame, logEvent } from '../engine/setup.js'
 import { randomSeed } from '../engine/rng.js'
 import { refillAllHands, cleanupAllPlayers, gainFear, usableHand, fearCount } from '../engine/draw.js'
+import { startActionRounds } from '../engine/actions.js'
 import { NIGHT_CARDS, RED_MOON, thresholdValue } from '../data/nights.js'
 import { LOCATIONS } from '../data/locations.js'
 import { STARTER_CARDS } from '../data/starterCards.js'
 import { GEAR_BY_ID } from '../data/gear.js'
+import ActionRound from './ActionRound.vue'
 
 /**
- * Phases 1-2 harness. Shows what setup produced for a seed, and lets you step
- * the draw/cleanup cycle by hand. There is still no action system -- the three
- * Day action rounds arrive in Phase 3.
+ * Phases 1-3 harness, in developer mode: both hands are visible, which the
+ * implementation plan allows until hotseat pass-screens are built.
+ *
+ * Night resolution is Phase 8, so "Finish Day" currently just cleans up and
+ * rolls the Day counter without resolving the Night card.
  */
-const game = shallowRef(createGame({ seed: randomSeed() }))
+/**
+ * Deeply reactive on purpose. A shallowRef would need manual re-wrapping after
+ * every engine mutation, and nested computeds would still cache stale values
+ * because the inner objects keep their identity.
+ */
+const game = ref(createGame({ seed: randomSeed() }))
 const seedInput = ref('')
-const cycles = ref(0)
 
 const nightsById = Object.fromEntries([...NIGHT_CARDS, RED_MOON].map((n) => [n.id, n]))
 const locationsById = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]))
 
-/** shallowRef only tracks reassignment, so re-wrap after engine mutations. */
-function touch() {
-  game.value = { ...game.value }
-}
-
 const playerCount = computed(() => game.value.players.length)
-const handsDrawn = computed(() => game.value.players.some((p) => p.hand.length > 0))
+const dayStarted = computed(() => game.value.players.some((p) => p.hand.length > 0))
 
 const schedule = computed(() =>
   game.value.nightSchedule.map((id, i) => {
@@ -34,6 +37,8 @@ const schedule = computed(() =>
     return { day: i + 1, name: card.name, band: card.band, thresholds: summarise(card) }
   }),
 )
+
+const tonightCard = computed(() => nightsById[game.value.nightSchedule[game.value.day - 1]])
 
 function summarise(card) {
   const P = playerCount.value
@@ -63,11 +68,10 @@ function stats(player) {
   }
 }
 
-const recentLog = computed(() => [...game.value.log].slice(-14).reverse())
+const recentLog = computed(() => [...game.value.log].slice(-16).reverse())
 
 function newGame(seed) {
   game.value = createGame({ seed: seed || randomSeed() })
-  cycles.value = 0
 }
 
 function startSeeded() {
@@ -75,20 +79,22 @@ function startSeeded() {
   seedInput.value = ''
 }
 
-function drawHands() {
+function startDay() {
   refillAllHands(game.value)
-  touch()
+  startActionRounds(game.value)
+}
+
+/** Night resolution lands in Phase 8; for now the Day just ends. */
+function finishDay() {
+  const state = game.value
+  cleanupAllPlayers(state)
+  state.tonight = { combat: 0, protection: 0 }
+  state.day += 1
+  logEvent(state, 'day-end', `Day ${state.day - 1} ended. Night resolution arrives in Phase 8.`)
 }
 
 function addFear(player) {
   gainFear(game.value, player, 1)
-  touch()
-}
-
-function endDay() {
-  cleanupAllPlayers(game.value)
-  cycles.value++
-  touch()
 }
 
 function exportState() {
@@ -104,8 +110,8 @@ function exportState() {
       <div>
         <h1>Alpha 1.0 &mdash; engine harness</h1>
         <p class="sub">
-          Phases 1&ndash;2: seeded setup, deck cycling, Gear replacement draws, Fear clogging.
-          No action system yet.
+          Phases 1&ndash;3, developer mode (both hands visible).
+          Camp Gather, Prepare and Recover resolve; Explore needs Phase 5, Work needs Phase 4.
         </p>
       </div>
       <div class="seed">
@@ -119,13 +125,19 @@ function exportState() {
     </header>
 
     <div class="controls">
-      <button :disabled="handsDrawn" @click="drawHands">Draw hands</button>
-      <button :disabled="!handsDrawn" @click="endDay">End Day &amp; cleanup</button>
-      <span class="muted">cycles completed: {{ cycles }}</span>
+      <strong>Day {{ game.day }}</strong>
+      <span class="muted">tonight: {{ tonightCard.name }}</span>
+      <button :disabled="dayStarted" @click="startDay">Start Day</button>
       <span class="muted hint">
-        Draw &rarr; cleanup repeatedly to watch the deck cycle. Add Fear to watch hands clog.
+        Start the Day to draw hands and open action round 1.
       </span>
     </div>
+
+    <ActionRound
+      v-if="dayStarted"
+      :game="game"
+      @day-complete="finishDay"
+    />
 
     <main>
       <section class="panel">
@@ -139,7 +151,7 @@ function exportState() {
 
           <div class="zones muted">
             draw {{ p.draw.length }} &middot; discard {{ p.discard.length }} &middot;
-            removed {{ p.removed.length }} &middot; deck total {{ stats(p).total }} &middot;
+            played {{ p.played.length }} &middot; deck total {{ stats(p).total }} &middot;
             fear {{ stats(p).fear }}
           </div>
 
@@ -161,7 +173,7 @@ function exportState() {
           </div>
 
           <div class="playable">
-            playable this round: <strong>{{ stats(p).usable }}</strong> of {{ p.hand.length }}
+            playable: <strong>{{ stats(p).usable }}</strong> of {{ p.hand.length }}
           </div>
         </div>
 
@@ -175,7 +187,7 @@ function exportState() {
         <h2>Night schedule</h2>
         <table>
           <tbody>
-            <tr v-for="n in schedule" :key="n.day">
+            <tr v-for="n in schedule" :key="n.day" :class="{ current: n.day === game.day }">
               <td class="day">Day {{ n.day }}</td>
               <td class="band" :class="n.band">{{ n.band === 'redMoon' ? 'Red Moon' : n.band }}</td>
               <td class="name">{{ n.name }}</td>
@@ -222,14 +234,14 @@ h2 {
   color: var(--muted); margin-bottom: 0.6rem;
 }
 .spaced { margin-top: 1.2rem; }
-.sub { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.75rem; }
+.sub { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.75rem; max-width: 46rem; }
 
 .seed { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 .seed code { color: var(--accent); }
 .seed input { width: 8rem; }
 
 .controls {
-  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap;
   margin-top: 0.9rem; padding: 0.6rem 0.8rem;
   background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
 }
@@ -249,6 +261,7 @@ main {
 table { width: 100%; border-collapse: collapse; }
 td { padding: 0.25rem 0.4rem; border-bottom: 1px solid #272a33; vertical-align: top; }
 tr:last-child td { border-bottom: none; }
+tr.current td { background: #262a33; }
 
 .day { color: var(--muted); white-space: nowrap; }
 .band { text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.08em; }

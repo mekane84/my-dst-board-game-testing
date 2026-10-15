@@ -69,6 +69,24 @@ export function createEmptyResources() {
  * @property {'playing'|'won'|'lost'} status
  */
 
+/**
+ * Fresh state for one action round.
+ *
+ * `phase` drives what the UI may offer:
+ *   selecting -> revealed -> resolving -> complete
+ */
+export function createRound(number) {
+  return {
+    number,
+    phase: 'selecting',
+    /** playerId -> selection. Hidden from the other player while selecting. */
+    selections: {},
+    /** Player ids in the team's chosen resolution order. */
+    order: [],
+    resolvedCount: 0,
+  }
+}
+
 /** Builds the full initial state. Decks are filled by setup.js. */
 export function createGameState({ seed, rng, players, locationDeck, nightSchedule, constants = CONSTANTS }) {
   return {
@@ -78,6 +96,7 @@ export function createGameState({ seed, rng, players, locationDeck, nightSchedul
     day: 1,
     phase: 'day',
     actionRound: 1,
+    round: createRound(1),
     players,
     resources: { ...constants.startingResources },
     camp: {
