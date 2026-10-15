@@ -1,0 +1,35 @@
+/* Utilitarian by design: this is a balance-testing harness, not a product. */
+
+:root {
+  --bg: #15161a;
+  --panel: #1e2027;
+  --border: #31343e;
+  --text: #e6e6ea;
+  --muted: #9a9ca8;
+  --accent: #d98a3a;
+  --good: #7ba05b;
+
+  color-scheme: dark;
+  font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+h1, h2 { margin: 0; font-weight: 600; }
+
+button, input {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.35rem 0.6rem;
+}
+
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }

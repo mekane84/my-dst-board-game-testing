@@ -1,0 +1,49 @@
+{
+  "meta": {
+    "version": "alpha-1.0-handoff",
+    "playerCount": 2,
+    "days": 10,
+    "note": "Reference data. Markdown rules are authoritative. Items marked provisional should remain easy to tune."
+  },
+  "startingState": {
+    "health": 5,
+    "maxHealth": 5,
+    "hunger": 2,
+    "maxHunger": 2,
+    "sharedResources": {"food": 0, "wood": 0, "grass": 0, "flint": 0, "silk": 0},
+    "starterDeck": {"gather": 3, "explore": 2, "prepare": 2, "recover": 1},
+    "handSize": 5,
+    "actionsPerDay": 3
+  },
+  "personalGear": [
+    {"id":"axe","name":"Axe","type":"reusable","cost":{"wood":1,"flint":1},"status":"locked","effect":"Once/day when Gathering Wood, +1 Wood."},
+    {"id":"pickaxe","name":"Pickaxe","type":"reusable","cost":{"wood":1,"flint":1},"status":"locked","effect":"Once/day when Gathering Flint, +1 Flint."},
+    {"id":"trap","name":"Trap","type":"reusable","cost":{"wood":1,"grass":1,"flint":1},"status":"provisional","effect":"Use with Rabbit Field Gather: 2 Food; Rabbit Field unavailable next Day."},
+    {"id":"backpack","name":"Backpack","type":"reusable","cost":{"grass":2},"status":"locked","effect":"When drawn/readied, draw 1 additional hand card."},
+    {"id":"map","name":"Map","type":"reusable","cost":{"grass":1,"flint":1},"status":"locked","effect":"Once/day Explore: draw 2 Locations, choose 1, bottom the other."},
+    {"id":"shovel","name":"Shovel","type":"reusable","cost":{"wood":1,"flint":1},"status":"provisional","effect":"Required to transplant Berry Bushes."},
+    {"id":"fishing_rod","name":"Fishing Rod","type":"reusable","cost":{"wood":1,"silk":1},"status":"current-alpha","effect":"Use with Pond Gather: 3 Food; Pond unavailable next Day."},
+    {"id":"top_hat","name":"Top Hat","type":"reusable","cost":{"silk":1},"status":"locked","effect":"When drawn, permanently remove 1 Fear from hand/played/discard; do not search draw pile."},
+    {"id":"spear","name":"Spear","type":"two-use","uses":2,"cost":{"wood":2,"flint":1},"status":"locked","effect":"Combat Prepare becomes 3 Combat total; may satisfy Spear Location effects."},
+    {"id":"torch","name":"Torch","type":"two-use","uses":2,"cost":{"wood":1,"grass":2},"status":"locked","effect":"Protection Prepare becomes 3 Protection total; may satisfy light Location effects."},
+    {"id":"log_suit","name":"Log Suit","type":"two-use","uses":2,"cost":{"wood":2,"grass":2},"status":"locked","effect":"Prevent 1 Health loss to owner per use."},
+    {"id":"small_campfire","name":"Small Campfire","type":"two-use","uses":2,"cost":{"wood":1,"grass":1},"status":"locked","effect":"Action: +2 Protection tonight; chosen survivor ignores next 1 Fear gained tonight."},
+    {"id":"garland","name":"Garland","type":"special-two-use","uses":2,"cost":{"grass":3},"status":"provisional","effect":"Craft: remove 1 Fear. Later draw: action to remove 1 Fear, then remove Garland from game."}
+  ],
+  "campImprovements": [
+    {"id":"fire_pit","name":"Fire Pit","cost":{"wood":3,"flint":2},"status":"locked","effect":"At Night spend 1 Wood; if fueled +2 Protection."},
+    {"id":"palisade","name":"Palisade","cost":{"wood":4,"flint":3},"status":"locked","effect":"+2 Combat every Night."},
+    {"id":"lean_to","name":"Lean-To","cost":{"wood":3,"grass":4},"status":"locked","effect":"First healing Recover/day heals 3 instead of 1."},
+    {"id":"tent","name":"Tent","cost":{"wood":3,"grass":5},"status":"locked","effect":"Once/day one survivor spends 1 action + 1 Food to remove up to 3 Fear from own hand/played/discard."}
+  ],
+  "foodInfrastructure": [
+    {"id":"transplanted_berry_bush","name":"Transplanted Berry Bush","cost":{"grass":1},"requires":"Ready Shovel + unused Berry Grove transplant opportunity + Work","status":"provisional","yield":{"food":2},"cooldownDays":1},
+    {"id":"simple_farm","name":"Simple Farm Plot","cost":{"wood":2,"grass":3,"flint":1},"status":"provisional","yield":{"food":3},"cooldownDays":1}
+  ],
+  "nightBands": {
+    "earlyDays":[1,2,3],
+    "midDays":[4,5,6,7],
+    "lateDays":[8,9],
+    "finalDay":10
+  }
+}

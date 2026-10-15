@@ -30,10 +30,8 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      # A short batch catches engine regressions that unit tests miss —
-      # if the bot suddenly cannot finish a game, something structural broke.
-      - name: Simulation smoke test
-        run: npm run sim -- 100
+      # A simulation smoke test returns here in Phase 11, once the headless
+      # runner exists. See docs/IMPLEMENTATION_PLAN.md.
 
       - run: npm run build
 

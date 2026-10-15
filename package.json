@@ -1,23 +1,22 @@
 {
-  "name": "my-dst-board-game-testing",
+  "name": "dst-coop-deckbuilder-alpha1",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
+  "description": "Alpha 1.0 balance-testing prototype of a 2-player co-op survival deck-builder",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "sim": "node scripts/sim.js"
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "pinia": "^4.0.3",
-    "vue": "^3.5.42"
+    "vue": "^3.5.44"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.8",
-    "vite": "^8.3.0",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "vite": "^8.3.4",
     "vitest": "^5.0.4"
   }
 }

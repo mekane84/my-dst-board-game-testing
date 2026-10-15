@@ -5,7 +5,12 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [vue()],
 
-  // GitHub Pages serves the site from /<repo>/, so assets need that prefix.
-  // Local dev and `vite preview` stay at the root.
+  // GitHub Pages serves from /<repo>/; local dev and preview stay at the root.
   base: process.env.GITHUB_ACTIONS ? '/my-dst-board-game-testing/' : '/',
+
+  test: {
+    // prototype-v0 is a parked, unrelated app with its own suite. Running it
+    // here would mix a different game's results into Alpha 1.0's.
+    exclude: ['**/node_modules/**', '**/dist/**', 'prototype-v0/**'],
+  },
 })
