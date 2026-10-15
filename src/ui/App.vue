@@ -27,6 +27,10 @@ import ActionRound from './ActionRound.vue'
 const game = ref(createGame({ seed: randomSeed() }))
 const seedInput = ref('')
 
+/** What happened in each round of the Day just played. Survives the Day end. */
+const roundResults = ref([])
+const lastDayPlayed = ref(null)
+
 const nightsById = Object.fromEntries([...NIGHT_CARDS, RED_MOON].map((n) => [n.id, n]))
 const locationsById = Object.fromEntries(LOCATIONS.map((l) => [l.id, l]))
 
@@ -96,7 +100,13 @@ function startSeeded() {
   seedInput.value = ''
 }
 
+function onRoundResolved(summary) {
+  roundResults.value.push(summary)
+}
+
 function startDay() {
+  roundResults.value = []
+  lastDayPlayed.value = null
   refillAllHands(game.value)
   startActionRounds(game.value)
 }
@@ -104,6 +114,7 @@ function startDay() {
 /** Night resolution lands in Phase 8; for now the Day just ends. */
 function finishDay() {
   const state = game.value
+  lastDayPlayed.value = state.day
   cleanupAllPlayers(state)
   state.tonight = { combat: 0, protection: 0 }
   state.day += 1
@@ -153,8 +164,28 @@ function exportState() {
     <ActionRound
       v-if="dayStarted"
       :game="game"
+      @round-resolved="onRoundResolved"
       @day-complete="finishDay"
     />
+
+    <section v-if="roundResults.length" class="panel results">
+      <h2>
+        Day {{ lastDayPlayed ?? game.day }} results
+        <span v-if="lastDayPlayed" class="done">complete</span>
+      </h2>
+      <div v-for="r in roundResults" :key="r.number" class="round-result">
+        <div class="r-head">
+          <span class="r-num">Round {{ r.number }}</span>
+          <span v-for="c in r.chosen" :key="c.name" class="r-chose">
+            <strong>{{ c.name }}</strong> {{ c.text }}
+          </span>
+        </div>
+        <ul class="r-events">
+          <li v-for="e in r.events" :key="e.index" :class="e.type">{{ e.message }}</li>
+          <li v-if="!r.events.length" class="muted">nothing happened</li>
+        </ul>
+      </div>
+    </section>
 
     <main>
       <section class="panel">
@@ -333,6 +364,29 @@ tr.current td { background: #262a33; }
 
 .mini { padding: 0.1rem 0.35rem; font-size: 0.68rem; }
 .playable { font-size: 0.72rem; color: var(--good); margin-top: 0.2rem; }
+
+.results { margin-top: 0.9rem; }
+.results h2 { display: flex; align-items: center; gap: 0.5rem; }
+.done {
+  font-size: 0.6rem; letter-spacing: 0.08em; color: var(--good);
+  border: 1px solid #3f5436; border-radius: 2px; padding: 0.05rem 0.3rem;
+}
+
+.round-result { padding: 0.4rem 0; border-bottom: 1px solid #272a33; }
+.round-result:last-child { border-bottom: none; }
+
+.r-head { display: flex; gap: 1rem; flex-wrap: wrap; align-items: baseline; font-size: 0.76rem; }
+.r-num { color: var(--muted); min-width: 4.5rem; }
+.r-chose { color: var(--accent); }
+.r-chose strong { color: var(--text); margin-right: 0.3rem; }
+
+.r-events { list-style: none; margin: 0.2rem 0 0 4.5rem; padding: 0; font-size: 0.74rem; }
+.r-events li { padding: 0.08rem 0; color: var(--good); }
+.r-events li.health-lost,
+.r-events li.hunger-lost,
+.r-events li.fear-gained,
+.r-events li.gear-broke { color: #d9776b; }
+.r-events li.muted { color: var(--muted); }
 
 .log { list-style: none; margin: 0; padding: 0; font-size: 0.74rem; }
 .log li { padding: 0.15rem 0; border-bottom: 1px solid #22252c; }

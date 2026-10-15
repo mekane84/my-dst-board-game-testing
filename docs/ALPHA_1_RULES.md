@@ -86,6 +86,20 @@ For each round:
 3. Team chooses the order in which the revealed actions resolve.
 4. Players may discuss freely before the next round.
 
+### An action that cannot resolve — RESOLVED 2026-10-15
+
+Because actions are chosen simultaneously and resolved in an order the team
+picks, an action can be legal when selected and impossible by the time it
+resolves — most obviously when the survivor ahead in the order spends the last
+of a shared resource on a craft.
+
+> When a revealed action cannot resolve, that survivor **chooses a new action**
+> instead. Their card is not spent and the action is not lost.
+
+Resolution then continues with their replacement action. This keeps resolution
+order a meaningful decision without letting it destroy a survivor's turn
+outright.
+
 ### Normal action-card actions
 
 A player may select a starter action card from hand and either:

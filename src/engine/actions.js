@@ -93,6 +93,36 @@ export function resolveNextAction(state) {
   return ok({ playerId })
 }
 
+/**
+ * Hands the current action back to its survivor to choose again.
+ *
+ * An action can be legal when selected and impossible by the time it resolves,
+ * because the survivor ahead of them in the order spent the same resources.
+ *
+ * RESOLVED 2026-10-15: that survivor simply picks again rather than losing the
+ * action. Their card was never spent -- resolution failed before it left hand --
+ * so nothing is wasted, and the round waits on them.
+ */
+export function reselectCurrentAction(state, reason) {
+  const round = state.round
+  if (round.phase !== 'resolving') return fail('Nothing is being resolved.')
+
+  const playerId = round.order[round.resolvedCount]
+  const player = state.players.find((p) => p.id === playerId)
+
+  delete round.selections[playerId]
+  round.phase = 'reselecting'
+  round.reselectFor = playerId
+
+  logEvent(state, 'reselect', `${player.name} must choose again: ${reason}`, {
+    playerId,
+    reason,
+    round: round.number,
+  })
+
+  return ok({ playerId })
+}
+
 export function roundComplete(state) {
   return state.round.phase === 'complete'
 }
@@ -135,7 +165,15 @@ export function advanceRound(state) {
  *   { kind: 'pass' }
  */
 export function selectAction(state, playerId, selection) {
-  if (state.round.phase !== 'selecting') return fail('Selections are closed for this round.')
+  const { phase, reselectFor } = state.round
+
+  if (phase === 'reselecting') {
+    if (playerId !== reselectFor) {
+      return fail('Only the survivor who must choose again may select right now.')
+    }
+  } else if (phase !== 'selecting') {
+    return fail('Selections are closed for this round.')
+  }
 
   const player = state.players.find((p) => p.id === playerId)
   if (!player) return fail(`No such survivor: ${playerId}`)
@@ -144,6 +182,12 @@ export function selectAction(state, playerId, selection) {
   if (!check.ok) return check
 
   state.round.selections[playerId] = selection
+
+  if (state.round.phase === 'reselecting') {
+    state.round.phase = 'resolving'
+    delete state.round.reselectFor
+  }
+
   logEvent(state, 'select', `${player.name} locked in an action.`, {
     playerId,
     // The choice itself is deliberately NOT logged here -- the log is visible
@@ -415,12 +459,9 @@ const HANDLERS = {
     },
     resolve(state, player) {
       // Lean-To's "first healing Recover each Day" bonus hooks in at Phase 7.
-      const result = healHealth(state, player, 1, { source: 'Recover' })
-      logEvent(state, 'recover', `${player.name} used Recover.`, {
-        playerId: player.id,
-        healed: result.healed,
-        health: player.health,
-      })
+      // healHealth already logs the outcome, including "already at full
+      // Health", so a second "used Recover" line would just be noise.
+      healHealth(state, player, 1, { source: 'Recover' })
       return ok()
     },
   },

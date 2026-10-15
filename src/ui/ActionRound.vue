@@ -11,12 +11,32 @@ import {
   advanceRound,
   legalSelections,
   describeSelection,
+  reselectCurrentAction,
 } from '../engine/actions.js'
 import { workOptions } from '../engine/crafting.js'
 import { GEAR_BY_ID, isTwoUse } from '../data/gear.js'
 
 const props = defineProps({ game: { type: Object, required: true } })
-const emit = defineEmits(['dayComplete'])
+const emit = defineEmits(['dayComplete', 'roundResolved'])
+
+/**
+ * Testing convenience, not a rules change.
+ *
+ * The engine still models reveal / choose-order / resolve as separate steps --
+ * hotseat secrecy and the team-chosen resolution order are real rules, and both
+ * the eventual player-facing UI and the simulator need them. This simply drives
+ * those steps for you, resolving in seat order, so a Day costs as few clicks as
+ * possible. Switch it off to step through by hand.
+ */
+const auto = ref(true)
+
+/** Log types that are an OUTCOME worth showing, rather than bookkeeping. */
+const OUTCOME_TYPES = new Set([
+  'gather', 'prepare', 'recover', 'craft', 'build', 'eat', 'pass',
+  'health-lost', 'health-healed', 'hunger-lost',
+  'fear-gained', 'fear-removed', 'garland-wasted',
+  'gear-used', 'gear-broke', 'action-fizzled',
+])
 
 /** `${playerId}:${uid}` of the card whose options are showing. */
 const expanded = ref(null)
@@ -27,6 +47,17 @@ const error = ref('')
 const round = computed(() => props.game.round)
 const phase = computed(() => round.value.phase)
 const everyoneLocked = computed(() => allSelected(props.game))
+const reselecting = computed(() => phase.value === 'reselecting')
+
+/** Who needs to choose right now. During a reselect, only the one survivor. */
+const pickers = computed(() =>
+  reselecting.value
+    ? props.game.players.filter((p) => p.id === round.value.reselectFor)
+    : props.game.players,
+)
+
+/** Survives the pause when a reselect interrupts resolution mid-round. */
+const pending = ref(null)
 
 function run(fn) {
   const result = fn()
@@ -54,6 +85,12 @@ function prepareModifier(player, choice) {
 
 function gearName(card) {
   return GEAR_BY_ID[card.cardId]?.name ?? card.cardId
+}
+
+/** Buttons for cards whose effect takes no further choice. */
+const SINGLE_CHOICE_LABELS = {
+  recover: 'Heal 1 Health',
+  explore: 'Explore',
 }
 
 /** The ways this card's printed effect can be resolved right now. */
@@ -90,7 +127,9 @@ function effectChoices(player, entry) {
     })
   }
 
-  return [{ label: 'Resolve', options: {} }]
+  // Cards with no choice to make still need a confirm button, so label it
+  // with what the card actually does rather than a generic "Resolve".
+  return [{ label: SINGLE_CHOICE_LABELS[entry.cardId] ?? entry.name ?? 'Resolve', options: {} }]
 }
 
 function workChoices(player) {
@@ -133,6 +172,7 @@ function chooseEffect(player, entry, choice) {
       options: choice.options,
     }),
   )
+  autoResolveRound()
 }
 
 function chooseWork(player, entry, target) {
@@ -146,6 +186,55 @@ function chooseWork(player, entry, target) {
       work: { type: target.kind, id: target.id },
     }),
   )
+  autoResolveRound()
+}
+
+/**
+ * Once both survivors have locked in, run the whole round through.
+ *
+ * An action that was legal when selected can be impossible by the time it
+ * resolves, so a failure fizzles that action rather than stalling the round.
+ */
+function autoResolveRound() {
+  if (!auto.value) return
+  const r = round.value
+
+  if (r.phase === 'selecting') {
+    if (!allSelected(props.game)) return
+    pending.value = { number: r.number, logStart: props.game.log.length }
+    revealSelections(props.game)
+    setResolutionOrder(props.game, props.game.players.map((p) => p.id))
+  } else if (r.phase !== 'resolving') {
+    return
+  }
+
+  while (!roundComplete(props.game)) {
+    const result = resolveNextAction(props.game)
+    if (!result.ok) {
+      // Their action became impossible, so hand it back and wait for them.
+      error.value = result.reason
+      reselectCurrentAction(props.game, result.reason)
+      return
+    }
+  }
+
+  // Selections are still readable here, so the summary reflects what was
+  // actually done -- including anything chosen during a reselect.
+  const captured = pending.value ?? { number: r.number, logStart: 0 }
+  emit('roundResolved', {
+    number: captured.number,
+    chosen: props.game.players.map((p) => ({
+      name: p.name,
+      text: describeSelection(props.game, selectionOf(p.id)),
+    })),
+    events: props.game.log.slice(captured.logStart).filter((e) => OUTCOME_TYPES.has(e.type)),
+  })
+
+  pending.value = null
+  error.value = ''
+
+  const advanced = advanceRound(props.game)
+  if (advanced.ok && advanced.dayComplete) emit('dayComplete')
 }
 
 function unlock(playerId) {
@@ -154,6 +243,7 @@ function unlock(playerId) {
 
 function passFor(playerId) {
   run(() => selectAction(props.game, playerId, { kind: 'pass' }))
+  autoResolveRound()
 }
 
 /* -------------------------------------------------- round flow */
@@ -192,14 +282,22 @@ function nameOf(id) {
     <div class="head">
       <h2>Action round {{ round.number }} of {{ game.constants.meta.actionsPerDay }}</h2>
       <span class="phase" :class="phase">{{ phase }}</span>
+      <label class="auto">
+        <input v-model="auto" type="checkbox" />
+        auto-resolve
+      </label>
       <span class="muted small">
         tonight: {{ game.tonight.combat }} combat &middot; {{ game.tonight.protection }} protection
       </span>
     </div>
 
     <!-- SELECTING ------------------------------------------------- -->
-    <div v-if="phase === 'selecting'" class="players">
-      <div v-for="p in game.players" :key="p.id" class="pick">
+    <div v-if="phase === 'selecting' || reselecting" class="players">
+      <p v-if="reselecting" class="notice">
+        That action could not resolve, so it comes back to you &mdash; your card was
+        never spent. Choose again.
+      </p>
+      <div v-for="p in pickers" :key="p.id" class="pick">
         <div class="pick-head">
           <strong>{{ p.name }}</strong>
           <span v-if="selectionOf(p.id)" class="locked">locked in</span>
@@ -265,7 +363,9 @@ function nameOf(id) {
         </template>
       </div>
 
-      <button class="primary" :disabled="!everyoneLocked" @click="reveal">Reveal both</button>
+      <button v-if="!auto" class="primary" :disabled="!everyoneLocked" @click="reveal">
+        Reveal both
+      </button>
     </div>
 
     <!-- REVEALED -------------------------------------------------- -->
@@ -325,6 +425,18 @@ h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color:
 .phase.revealed { color: var(--accent); }
 .phase.resolving { color: #d6c88f; }
 .phase.complete { color: var(--good); }
+
+.auto {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  font-size: 0.7rem; color: var(--muted); cursor: pointer;
+}
+.auto input { margin: 0; }
+
+.notice {
+  margin: 0 0 0.5rem; padding: 0.4rem 0.55rem; font-size: 0.75rem;
+  color: #e2c37a; background: rgba(214, 200, 143, 0.08);
+  border-left: 2px solid #d6c88f; border-radius: 2px;
+}
 
 .players { display: flex; flex-direction: column; gap: 0.6rem; }
 .pick { padding: 0.45rem 0; border-bottom: 1px solid #272a33; }

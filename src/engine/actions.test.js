@@ -14,6 +14,7 @@ import {
   roundComplete,
   advanceRound,
   legalSelections,
+  reselectCurrentAction,
 } from './actions.js'
 
 /** A game with hands drawn and round 1 open. */
@@ -261,7 +262,7 @@ describe('Recover', () => {
     })
 
     expect(state.players[0].health).toBe(5)
-    expect(state.log.some((e) => e.type === 'recover' && e.healed === 0)).toBe(true)
+    expect(state.log.some((e) => e.type === 'health-healed' && e.healed === 0)).toBe(true)
   })
 })
 
@@ -612,5 +613,74 @@ describe('Work resolves crafting and building', () => {
     expect(second.reason).toMatch(/missing/i)
     expect(state.players[1].readyGear.map((c) => c.cardId)).toEqual(['pickaxe'])
     expect(state.players[0].readyGear).toEqual([])
+  })
+})
+
+describe('an action that cannot resolve', () => {
+  /** Sets up two crafts competing for the same single wood + flint. */
+  function contested() {
+    const state = opened()
+    state.resources.wood = 1
+    state.resources.flint = 1
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'gather')
+
+    selectAction(state, 'p0', { kind: 'card', uid: a.uid, mode: 'work', work: { type: 'craft', id: 'axe' } })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'work', work: { type: 'craft', id: 'pickaxe' } })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+
+    resolveNextAction(state)
+    const blocked = resolveNextAction(state)
+    expect(blocked.ok).toBe(false)
+    return { state, blocked, cardB: b }
+  }
+
+  it('hands the action back to its survivor to choose again', () => {
+    const { state, blocked } = contested()
+
+    expect(reselectCurrentAction(state, blocked.reason).ok).toBe(true)
+    expect(state.round.phase).toBe('reselecting')
+    expect(state.round.reselectFor).toBe('p1')
+    expect(state.log.some((e) => e.type === 'reselect')).toBe(true)
+  })
+
+  it('leaves their card unspent, so nothing is wasted', () => {
+    const { state, blocked, cardB } = contested()
+    reselectCurrentAction(state, blocked.reason)
+
+    expect(state.players[1].hand.map((c) => c.uid)).toContain(cardB.uid)
+    expect(state.players[1].played).toEqual([])
+  })
+
+  it('only lets the affected survivor pick during a reselect', () => {
+    const { state, blocked } = contested()
+    reselectCurrentAction(state, blocked.reason)
+
+    const wrongPlayer = selectAction(state, 'p0', { kind: 'pass' })
+    expect(wrongPlayer.ok).toBe(false)
+    expect(wrongPlayer.reason).toMatch(/must choose again/i)
+  })
+
+  it('resumes resolution once they have picked something else', () => {
+    const { state, blocked, cardB } = contested()
+    reselectCurrentAction(state, blocked.reason)
+
+    const retry = selectAction(state, 'p1', {
+      kind: 'card', uid: cardB.uid, mode: 'effect', options: { resource: 'grass' },
+    })
+    expect(retry.ok).toBe(true)
+    expect(state.round.phase).toBe('resolving')
+
+    expect(resolveNextAction(state).ok).toBe(true)
+    expect(roundComplete(state)).toBe(true)
+    expect(state.resources.grass).toBe(1)
+    expect(state.players[0].readyGear.map((c) => c.cardId)).toEqual(['axe'])
+  })
+
+  it('refuses when nothing is being resolved', () => {
+    const state = opened()
+    expect(reselectCurrentAction(state, 'x').ok).toBe(false)
   })
 })
