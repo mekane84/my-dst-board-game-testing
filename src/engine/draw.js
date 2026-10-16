@@ -168,15 +168,39 @@ export function cleanupAllPlayers(state) {
  * Adds Fear cards to a survivor's discard pile, which is where gained Fear goes
  * unless an effect says otherwise.
  */
-export function gainFear(state, player, amount = 1) {
+export function gainFear(state, player, amount = 1, { night = false } = {}) {
+  let gained = 0
+  let shielded = 0
+
   for (let i = 0; i < amount; i++) {
+    // A Small Campfire shield only absorbs Fear gained during the Night, and
+    // only one point per shield.
+    if (night) {
+      const shield = state.tonight?.fearShields?.find((s) => s.playerId === player.id && !s.used)
+      if (shield) {
+        shield.used = true
+        shielded++
+        continue
+      }
+    }
     player.discard.push(makeCard(state, FEAR_CARD.id, 'fear'))
+    gained++
   }
 
-  logEvent(state, 'fear-gained', `${player.name} gained ${amount} Fear.`, {
-    playerId: player.id,
-    amount,
-  })
+  if (shielded > 0) {
+    logEvent(state, 'fear-shielded', `${player.name} shrugged off ${shielded} Fear by the fire.`, {
+      playerId: player.id,
+      shielded,
+    })
+  }
+  if (gained > 0) {
+    logEvent(state, 'fear-gained', `${player.name} gained ${gained} Fear.`, {
+      playerId: player.id,
+      amount: gained,
+    })
+  }
+
+  return { gained, shielded }
 }
 
 /** Hand cards that can actually be played or used as Work -- i.e. not Fear. */

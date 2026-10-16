@@ -125,6 +125,16 @@ export const GEAR = [
     text: 'Action: gain +2 Protection this Night. Also, one survivor may ignore 1 Fear gained this Night.',
     /** Costs one of the three daily actions, not a starter card. */
     costsAction: true,
+    ability: {
+      protection: 2,
+      /**
+       * Each use creates one shield: a chosen survivor ignores the NEXT 1 Fear
+       * they would gain this Night. It does not remove Fear already held, and
+       * an unused shield expires with the Night.
+       */
+      fearShields: 1,
+      spendsUse: true,
+    },
   },
   {
     id: 'garland',
@@ -141,6 +151,15 @@ export const GEAR = [
      * the card.
      */
     craftUseAlwaysSpent: true,
+    /** The second use, taken from Ready Gear on a later Day. */
+    ability: {
+      removeFear: 1,
+      spendsUse: true,
+      /** Spending this use removes Garland from the deck and the game. */
+      removesSelf: true,
+      /** Unlike the craft-use, this one is declined rather than wasted. */
+      requiresEligibleFear: true,
+    },
   },
 ]
 

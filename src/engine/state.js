@@ -112,7 +112,15 @@ export function createGameState({ seed, rng, players, locationDeck, nightSchedul
       explored: [],
     },
     nightSchedule,
-    tonight: { combat: 0, protection: 0 },
+    tonight: {
+      combat: 0,
+      protection: 0,
+      /**
+       * Small Campfire shields: each lets one survivor ignore the next 1 Fear
+       * they would gain THIS Night. Unused shields expire with the Night.
+       */
+      fearShields: [],
+    },
     /** Monotonic counter backing every Card.uid. */
     cardCounter: 0,
     status: 'playing',

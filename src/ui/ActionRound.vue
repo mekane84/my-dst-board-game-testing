@@ -17,6 +17,7 @@ import {
 import { resolveChoice, resolveTake } from '../engine/effects.js'
 import { locationOptions } from '../engine/locations.js'
 import { foodSourceOptions } from '../engine/food.js'
+import { abilityOptions } from '../engine/abilities.js'
 import { LOCATIONS_BY_ID } from '../data/locations.js'
 import PendingDecision from './PendingDecision.vue'
 import { workOptions } from '../engine/crafting.js'
@@ -212,6 +213,40 @@ function costText(cost) {
 }
 
 /* -------------------------------------------------- selection flow */
+
+/** Action-cost abilities: taken instead of playing a card from hand. */
+function abilitiesFor(player) {
+  return abilityOptions(props.game, player)
+}
+
+/** Small Campfire needs to know which survivor its Fear shield protects. */
+function needsShieldTarget(ability) {
+  return ability.id === 'small_campfire'
+}
+
+function chooseAbility(player, ability, shieldPlayerId) {
+  expanded.value = null
+  run(() =>
+    selectAction(props.game, player.id, {
+      kind: 'ability',
+      source: ability.source,
+      id: ability.id,
+      uid: ability.uid,
+      ...(shieldPlayerId ? { options: { shieldPlayerId } } : {}),
+    }),
+  )
+  autoResolveRound()
+}
+
+function toggleAbility(player, ability) {
+  const key = `ability:${player.id}:${ability.uid ?? ability.id}`
+  workMode.value = false
+  expanded.value = expanded.value === key ? null : key
+}
+
+function abilityKey(player, ability) {
+  return `ability:${player.id}:${ability.uid ?? ability.id}`
+}
 
 function handFor(player) {
   return legalSelections(props.game, player)
@@ -423,10 +458,36 @@ function nameOf(id) {
             >{{ entry.name || entry.cardId }}</button>
 
             <button
-              v-if="!handFor(p).some((e) => e.available)"
+              v-if="!handFor(p).some((e) => e.available) && !abilitiesFor(p).some((a) => a.available)"
               class="mini"
               @click="passFor(p.id)"
             >Pass</button>
+          </div>
+
+          <!-- Abilities cost an action but no card from hand -->
+          <div v-if="abilitiesFor(p).length" class="row wrap abilities">
+            <span class="tag">abilities</span>
+            <template v-for="ability in abilitiesFor(p)" :key="abilityKey(p, ability)">
+              <button
+                class="mini ability"
+                :class="{ dim: !ability.available, open: expanded === abilityKey(p, ability) }"
+                :disabled="!ability.available"
+                :title="ability.reason || ability.text"
+                @click="needsShieldTarget(ability)
+                  ? toggleAbility(p, ability)
+                  : chooseAbility(p, ability)"
+              >{{ ability.name }}</button>
+
+              <span v-if="expanded === abilityKey(p, ability)" class="options">
+                <span class="tag">shield</span>
+                <button
+                  v-for="target in game.players"
+                  :key="target.id"
+                  class="mini opt"
+                  @click="chooseAbility(p, ability, target.id)"
+                >{{ target.name }}</button>
+              </span>
+            </template>
           </div>
 
           <!-- Expanded card: its effect options, or its Work targets -->
@@ -555,6 +616,9 @@ h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; color:
 .mini { padding: 0.15rem 0.4rem; font-size: 0.72rem; }
 .mini.dim { opacity: 0.35; }
 .mini.open { border-color: var(--accent); color: var(--accent); }
+.abilities { margin-top: 0.3rem; }
+.ability { border-color: #4a4335; color: #d6c88f; }
+.ability:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 
 .expand {
   display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;

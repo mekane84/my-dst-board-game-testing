@@ -149,7 +149,8 @@ function finishDay() {
   const state = game.value
   lastDayPlayed.value = state.day
   cleanupAllPlayers(state)
-  state.tonight = { combat: 0, protection: 0 }
+  // Fear shields expire with the Night, used or not.
+  state.tonight = { combat: 0, protection: 0, fearShields: [] }
   state.day += 1
   logEvent(state, 'day-end', `Day ${state.day - 1} ended. Night resolution arrives in Phase 8.`)
 }

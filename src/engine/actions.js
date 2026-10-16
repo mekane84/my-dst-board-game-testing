@@ -16,9 +16,10 @@ import { logEvent } from './setup.js'
 import { moveCard, createRound } from './state.js'
 import { STARTER_CARDS } from '../data/starterCards.js'
 import { GEAR_BY_ID } from '../data/gear.js'
-import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
+import { BUILDABLE_BY_ID, CAMP_IMPROVEMENTS } from '../data/campImprovements.js'
 import { readyGearById, useGear } from './gear.js'
 import { craftGear, buildStructure } from './crafting.js'
+import { abilityOptions, useAbility } from './abilities.js'
 import { healHealth } from './survivor.js'
 import { exploreLocation, gatherAtLocation, locationOptions } from './locations.js'
 import { harvestFoodSource, foodSourceOptions } from './food.js'
@@ -237,9 +238,15 @@ function validateSelection(state, player, selection) {
   }
 
   if (selection.kind === 'ability') {
-    // Small Campfire, Tent, and Garland's second use all cost an action
-    // rather than a starter card. They land in Phase 7 with Fear management.
-    return fail('Action-cost Gear and Camp abilities arrive in Phase 7.')
+    // Taken INSTEAD of playing a starter card: costs one of the three daily
+    // actions but no card from hand.
+    const offered = abilityOptions(state, player).find((a) =>
+      selection.source === 'gear'
+        ? a.source === 'gear' && a.uid === selection.uid
+        : a.source === 'camp' && a.id === selection.id,
+    )
+    if (!offered) return fail('That ability is not available to you right now.')
+    return offered.available ? ok() : fail(offered.reason)
   }
 
   if (selection.kind !== 'card') return fail(`Unknown selection kind: ${selection.kind}`)
@@ -311,7 +318,12 @@ function legalCardSelections(state, player) {
 export function describeSelection(state, selection) {
   if (!selection) return 'nothing'
   if (selection.kind === 'pass') return 'passed'
-  if (selection.kind === 'ability') return `ability ${selection.id}`
+  if (selection.kind === 'ability') {
+    const label = GEAR_BY_ID[selection.id]?.name
+      ?? CAMP_IMPROVEMENTS.find((c) => c.id === selection.id)?.name
+      ?? selection.id
+    return `${label} (ability)`
+  }
 
   const name = cardNameByUid(state, selection.uid)
   if (selection.mode === 'work') return `${name} as Work`
@@ -336,6 +348,10 @@ function cardNameByUid(state, uid) {
 /* ------------------------------------------------------------------ */
 
 function applySelection(state, player, selection) {
+  if (selection.kind === 'ability') {
+    return useAbility(state, player, selection)
+  }
+
   if (selection.kind === 'pass') {
     logEvent(state, 'pass', `${player.name} had no legal action and passed.`, { playerId: player.id })
     return ok()
@@ -510,10 +526,28 @@ const HANDLERS = {
       return ok()
     },
     resolve(state, player) {
-      // Lean-To's "first healing Recover each Day" bonus hooks in at Phase 7.
+      let amount = 1
+
+      /**
+       * RESOLVED 2026-10-14: "healing" is load-bearing. A Recover played at
+       * full Health is not a healing Recover, so it neither heals nor burns
+       * the Day's Lean-To bonus.
+       */
+      const leanTo = state.camp.improvements.lean_to
+      const wouldHeal = player.health < state.constants.survivor.maxHealth
+
+      if (leanTo && wouldHeal && leanTo.usedOnDay !== state.day) {
+        amount = CAMP_IMPROVEMENTS.find((c) => c.id === 'lean_to').firstHealingRecoverHeals
+        leanTo.usedOnDay = state.day
+        logEvent(state, 'lean-to', `The Lean-To makes ${player.name}'s rest count for more.`, {
+          playerId: player.id,
+          heals: amount,
+        })
+      }
+
       // healHealth already logs the outcome, including "already at full
       // Health", so a second "used Recover" line would just be noise.
-      healHealth(state, player, 1, { source: 'Recover' })
+      healHealth(state, player, amount, { source: 'Recover' })
       return ok()
     },
   },

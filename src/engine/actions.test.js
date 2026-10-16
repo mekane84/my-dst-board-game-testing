@@ -360,11 +360,13 @@ describe('what is not legal yet', () => {
     expect(result.ok).toBe(true)
   })
 
-  it('reports action-cost abilities as coming later', () => {
+  it('rejects an ability the survivor does not actually have', () => {
     const state = opened()
-    const result = selectAction(state, 'p0', { kind: 'ability', source: 'gear', id: 'small_campfire' })
+    const result = selectAction(state, 'p0', {
+      kind: 'ability', source: 'gear', id: 'small_campfire', uid: 'not-mine',
+    })
     expect(result.ok).toBe(false)
-    expect(result.reason).toMatch(/phase 7/i)
+    expect(result.reason).toMatch(/not available to you/i)
   })
 })
 
