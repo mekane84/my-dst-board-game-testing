@@ -10,6 +10,7 @@ import { STARTER_CARDS } from '../data/starterCards.js'
 import { GEAR_BY_ID } from '../data/gear.js'
 import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
 import { majorImprovementCount } from '../engine/crafting.js'
+import { LOCATIONS_BY_ID } from '../data/locations.js'
 import ActionRound from './ActionRound.vue'
 
 /**
@@ -70,6 +71,37 @@ function gearLabel(card) {
   const name = GEAR_BY_ID[card.cardId]?.name ?? card.cardId
   return card.uses === undefined ? name : `${name} (${card.uses})`
 }
+
+/** Explored Locations with a short status, from the acting team's view. */
+const explored = computed(() =>
+  game.value.locations.explored.map((record) => {
+    const def = LOCATIONS_BY_ID[record.id]
+    let status = 'ready'
+    let note = null
+
+    if (!def.gatherEffects) {
+      status = 'spent'
+      note = 'no repeat gather'
+    } else if (def.clearable && record.cleared) {
+      status = 'spent'
+      note = 'cleared out'
+    } else if (record.availableOnDay !== null && game.value.day < record.availableOnDay) {
+      status = 'resting'
+      note = `back on Day ${record.availableOnDay}`
+    } else if (record.gatheredOnDay === game.value.day) {
+      status = 'used'
+      note = 'gathered today'
+    } else if (def.gatherRequiresGear) {
+      status = 'gated'
+      note = `needs ${def.gatherRequiresGear.replace(/_/g, ' ')}`
+    }
+
+    const transplant =
+      record.transplantSlots > 0 ? (record.transplantUsed ? 'transplanted' : 'transplant free') : null
+
+    return { id: record.id, name: record.name, status, note, transplant }
+  }),
+)
 
 const camp = computed(() => {
   const g = game.value
@@ -273,6 +305,24 @@ function exportState() {
       </section>
 
       <section class="panel wide">
+        <h2>
+          Explored ({{ explored.length }})
+          <span class="muted small">&mdash; {{ game.locations.deck.length }} left in the deck</span>
+        </h2>
+        <p v-if="!explored.length" class="muted small">
+          Nothing explored yet. Spend an Explore action to turn a card face up.
+        </p>
+        <ul class="explored">
+          <li v-for="loc in explored" :key="loc.id" :class="loc.status">
+            <span class="loc-name">{{ loc.name }}</span>
+            <span class="loc-status">{{ loc.status }}</span>
+            <span v-if="loc.note" class="muted small">{{ loc.note }}</span>
+            <span v-if="loc.transplant" class="transplant">{{ loc.transplant }}</span>
+          </li>
+        </ul>
+      </section>
+
+      <section class="panel wide">
         <h2>Location deck order ({{ game.locations.deck.length }})</h2>
         <ol class="locations">
           <li v-for="(id, i) in game.locations.deck" :key="id">
@@ -392,6 +442,24 @@ tr.current td { background: #262a33; }
 .log li { padding: 0.15rem 0; border-bottom: 1px solid #22252c; }
 .log li:last-child { border-bottom: none; }
 .log .muted { display: inline-block; min-width: 8rem; }
+
+.explored { list-style: none; margin: 0; padding: 0; }
+.explored li {
+  display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.22rem 0; border-bottom: 1px solid #22252c; font-size: 0.78rem;
+}
+.explored li:last-child { border-bottom: none; }
+.loc-name { min-width: 17rem; }
+.loc-status {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em;
+  border: 1px solid var(--border); border-radius: 2px; padding: 0.05rem 0.3rem;
+}
+.explored li.ready .loc-status { color: var(--good); border-color: #3f5436; }
+.explored li.resting .loc-status { color: #d6c88f; border-color: #4e4731; }
+.explored li.used .loc-status { color: var(--muted); }
+.explored li.gated .loc-status { color: #8fb8d6; border-color: #35444e; }
+.explored li.spent { opacity: 0.5; }
+.transplant { font-size: 0.66rem; color: var(--accent); }
 
 .locations { margin: 0; padding-left: 1.4rem; columns: 3; font-size: 0.78rem; }
 .locations li { margin-bottom: 0.15rem; break-inside: avoid; }

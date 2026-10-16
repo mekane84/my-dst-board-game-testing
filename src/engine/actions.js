@@ -20,6 +20,7 @@ import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
 import { readyGearById, useGear } from './gear.js'
 import { craftGear, buildStructure } from './crafting.js'
 import { healHealth } from './survivor.js'
+import { exploreLocation, gatherAtLocation, locationOptions } from './locations.js'
 
 const ok = (extra = {}) => ({ ok: true, ...extra })
 const fail = (reason) => ({ ok: false, reason })
@@ -87,6 +88,10 @@ export function resolveNextAction(state) {
   const result = applySelection(state, player, selection)
   if (!result.ok) return result
 
+  // Location Dangers ask questions. The action is not finished until the
+  // player has answered, so hold the round here.
+  if (state.pending) return ok({ playerId, pending: true })
+
   round.resolvedCount += 1
   if (round.resolvedCount >= round.order.length) round.phase = 'complete'
 
@@ -121,6 +126,23 @@ export function reselectCurrentAction(state, reason) {
   })
 
   return ok({ playerId })
+}
+
+/**
+ * Completes the action that was waiting on a decision.
+ *
+ * Called once `state.pending` has been answered, to advance the round that
+ * resolveNextAction deliberately left hanging.
+ */
+export function finishPendingAction(state) {
+  if (state.pending) return fail('A decision is still waiting.')
+
+  const round = state.round
+  if (round.phase !== 'resolving') return fail('Nothing is being resolved.')
+
+  round.resolvedCount += 1
+  if (round.resolvedCount >= round.order.length) round.phase = 'complete'
+  return ok()
 }
 
 export function roundComplete(state) {
@@ -329,6 +351,8 @@ function applySelection(state, player, selection) {
   if (!result.ok) return result
 
   // Played cards sit in `played` until end-of-Day cleanup sweeps them away.
+  // This happens even when the action is mid-decision: handlers validate
+  // before they mutate, so reaching here means the action legally began.
   moveCard(player, card.uid, 'hand', 'played')
   return ok()
 }
@@ -351,18 +375,26 @@ const HANDLERS = {
      * targeting a Location is rejected with a reason rather than ignored.
      */
     available(state, player, options) {
-      if (options.target === 'location') {
-        return fail('Location Gather arrives in Phase 5.')
-      }
-      return ok()
+      if (options.target !== 'location') return ok()
+
+      const choice = locationOptions(state, player).find((l) => l.id === options.locationId)
+      if (!choice) return fail('That Location has not been explored.')
+      return choice.available ? ok() : fail(choice.reason)
     },
-    options(state) {
-      return { campResources: [...state.constants.gather.campResources] }
+    options(state, player) {
+      return {
+        campResources: [...state.constants.gather.campResources],
+        locations: locationOptions(state, player),
+      }
     },
     resolve(state, player, options) {
       const { campResources, campYield } = state.constants.gather
 
-      if (options.target === 'location') return fail('Location Gather arrives in Phase 5.')
+      if (options.target === 'location') {
+        if (!options.locationId) return fail('Choose a Location to gather from.')
+        return gatherAtLocation(state, player, options.locationId, { gearUid: options.gearUid })
+      }
+
       if (!options.resource) return fail('Choose a resource to gather at Camp.')
       if (!campResources.includes(options.resource)) {
         // Food is excluded from this list on purpose: it can never be gathered
@@ -402,11 +434,16 @@ const HANDLERS = {
   },
 
   explore: {
+    /**
+     * Always legal. An empty Location deck still finds nothing rather than
+     * being illegal -- the rules say the Explore card may be used as Work
+     * instead, which is the player's call, not a block.
+     */
     available() {
-      return fail('Explore needs Location effects, which arrive in Phase 5.')
+      return ok()
     },
-    resolve() {
-      return fail('Explore needs Location effects, which arrive in Phase 5.')
+    resolve(state, player, options) {
+      return exploreLocation(state, player, { gearUid: options.gearUid })
     },
   },
 

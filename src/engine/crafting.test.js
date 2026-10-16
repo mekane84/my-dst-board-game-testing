@@ -186,7 +186,7 @@ describe('food infrastructure', () => {
 
     const result = buildStructure(state, p, 'transplanted_berry_bush')
     expect(result.ok).toBe(false)
-    expect(result.reason).toMatch(/phase 5/i)
+    expect(result.reason).toMatch(/berry grove/i)
   })
 })
 

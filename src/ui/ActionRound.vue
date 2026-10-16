@@ -12,7 +12,12 @@ import {
   legalSelections,
   describeSelection,
   reselectCurrentAction,
+  finishPendingAction,
 } from '../engine/actions.js'
+import { resolveChoice, resolveTake } from '../engine/effects.js'
+import { locationOptions } from '../engine/locations.js'
+import { LOCATIONS_BY_ID } from '../data/locations.js'
+import PendingDecision from './PendingDecision.vue'
 import { workOptions } from '../engine/crafting.js'
 import { GEAR_BY_ID, isTwoUse } from '../data/gear.js'
 
@@ -48,6 +53,7 @@ const round = computed(() => props.game.round)
 const phase = computed(() => round.value.phase)
 const everyoneLocked = computed(() => allSelected(props.game))
 const reselecting = computed(() => phase.value === 'reselecting')
+const pendingDecision = computed(() => props.game.pending)
 
 /** Who needs to choose right now. During a reselect, only the one survivor. */
 const pickers = computed(() =>
@@ -96,30 +102,77 @@ const SINGLE_CHOICE_LABELS = {
 /** The ways this card's printed effect can be resolved right now. */
 function effectChoices(player, entry) {
   if (entry.cardId === 'gather') {
-    return props.game.constants.gather.campResources.flatMap((resource) => {
-      const rows = [{ label: resource, options: { resource } }]
+    const rows = []
+
+    // Camp Gather: always available, no once-per-Day limit.
+    for (const resource of props.game.constants.gather.campResources) {
+      rows.push({ label: `Camp: ${resource}`, options: { resource }, available: true })
       const mod = gatherModifier(player, resource)
       if (mod) {
         const bonus = GEAR_BY_ID[mod.cardId].gatherBonus.amount
         rows.push({
-          label: `${resource} +${bonus} (${gearName(mod)})`,
+          label: `Camp: ${resource} +${bonus} (${gearName(mod)})`,
           boosted: true,
+          available: true,
           options: { resource, gearUid: mod.uid },
         })
       }
-      return rows
-    })
+    }
+
+    // Explored Locations, each carrying why it is unavailable if it is.
+    for (const loc of locationOptions(props.game, player)) {
+      rows.push({
+        label: loc.name,
+        options: { target: 'location', locationId: loc.id },
+        available: loc.available,
+        reason: loc.reason,
+      })
+
+      if (!loc.available) continue
+      const def = LOCATIONS_BY_ID[loc.id]
+      for (const mod of player.readyGear) {
+        const bonus = GEAR_BY_ID[mod.cardId]?.gatherBonus
+        if (!bonus) continue
+        const helps = def.gatherEffects?.some(
+          (e) => e.type === 'gain' && e.resource === bonus.resource,
+        )
+        if (!helps) continue
+        rows.push({
+          label: `${loc.name} +${bonus.amount} (${gearName(mod)})`,
+          boosted: true,
+          available: true,
+          options: { target: 'location', locationId: loc.id, gearUid: mod.uid },
+        })
+      }
+    }
+
+    return rows
+  }
+
+  if (entry.cardId === 'explore') {
+    const rows = [{ label: 'Explore', options: {}, available: true }]
+    const map = player.readyGear.find((c) => GEAR_BY_ID[c.cardId]?.modifies === 'explore')
+    if (map) {
+      rows.push({
+        label: `Explore with ${gearName(map)} (draw 2, keep 1)`,
+        boosted: true,
+        available: true,
+        options: { gearUid: map.uid },
+      })
+    }
+    return rows
   }
 
   if (entry.cardId === 'prepare') {
     return ['combat', 'protection'].flatMap((choice) => {
-      const rows = [{ label: `+1 ${choice}`, options: { choice } }]
+      const rows = [{ label: `+1 ${choice}`, options: { choice }, available: true }]
       const mod = prepareModifier(player, choice)
       if (mod) {
         const total = GEAR_BY_ID[mod.cardId].prepareBonus.total
         rows.push({
           label: `+${total} ${choice} (${gearName(mod)})`,
           boosted: true,
+          available: true,
           options: { choice, gearUid: mod.uid },
         })
       }
@@ -129,7 +182,11 @@ function effectChoices(player, entry) {
 
   // Cards with no choice to make still need a confirm button, so label it
   // with what the card actually does rather than a generic "Resolve".
-  return [{ label: SINGLE_CHOICE_LABELS[entry.cardId] ?? entry.name ?? 'Resolve', options: {} }]
+  return [{
+    label: SINGLE_CHOICE_LABELS[entry.cardId] ?? entry.name ?? 'Resolve',
+    options: {},
+    available: true,
+  }]
 }
 
 function workChoices(player) {
@@ -197,6 +254,9 @@ function chooseWork(player, entry, target) {
  */
 function autoResolveRound() {
   if (!auto.value) return
+  // A Location Danger is mid-question; nothing moves until it is answered.
+  if (props.game.pending) return
+
   const r = round.value
 
   if (r.phase === 'selecting') {
@@ -204,9 +264,13 @@ function autoResolveRound() {
     pending.value = { number: r.number, logStart: props.game.log.length }
     revealSelections(props.game)
     setResolutionOrder(props.game, props.game.players.map((p) => p.id))
-  } else if (r.phase !== 'resolving') {
+  } else if (r.phase === 'reselecting') {
+    // Waiting on a human to choose again.
     return
   }
+  // 'resolving' falls through to the loop below. So does 'complete', which
+  // happens when answering a decision finished the round's last action -- the
+  // loop then does nothing and we go straight to wrapping the round up.
 
   while (!roundComplete(props.game)) {
     const result = resolveNextAction(props.game)
@@ -216,6 +280,8 @@ function autoResolveRound() {
       reselectCurrentAction(props.game, result.reason)
       return
     }
+    // The action opened a decision; resume once the player answers.
+    if (props.game.pending) return
   }
 
   // Selections are still readable here, so the summary reflects what was
@@ -235,6 +301,24 @@ function autoResolveRound() {
 
   const advanced = advanceRound(props.game)
   if (advanced.ok && advanced.dayComplete) emit('dayComplete')
+}
+
+/** Answers an open decision, then picks the round back up. */
+function settleDecision(fn) {
+  const result = run(fn)
+  if (!result.ok) return
+  if (props.game.pending) return
+
+  finishPendingAction(props.game)
+  autoResolveRound()
+}
+
+function answerChoice(index) {
+  settleDecision(() => resolveChoice(props.game, index))
+}
+
+function answerTake(tally) {
+  settleDecision(() => resolveTake(props.game, tally))
 }
 
 function unlock(playerId) {
@@ -291,8 +375,16 @@ function nameOf(id) {
       </span>
     </div>
 
+    <!-- A DECISION IS OPEN ----------------------------------------- -->
+    <PendingDecision
+      v-if="pendingDecision"
+      :pending="pendingDecision"
+      @choose="answerChoice"
+      @take="answerTake"
+    />
+
     <!-- SELECTING ------------------------------------------------- -->
-    <div v-if="phase === 'selecting' || reselecting" class="players">
+    <div v-else-if="phase === 'selecting' || reselecting" class="players">
       <p v-if="reselecting" class="notice">
         That action could not resolve, so it comes back to you &mdash; your card was
         never spent. Choose again.
@@ -334,7 +426,9 @@ function nameOf(id) {
                   v-for="choice in effectChoices(p, entry)"
                   :key="choice.label"
                   class="mini opt"
-                  :class="{ boosted: choice.boosted }"
+                  :class="{ boosted: choice.boosted, dim: choice.available === false }"
+                  :disabled="choice.available === false"
+                  :title="choice.reason || ''"
                   @click="chooseEffect(p, entry, choice)"
                 >{{ choice.label }}</button>
                 <button class="mini work" @click="workMode = true">Work instead &rarr;</button>
@@ -369,7 +463,7 @@ function nameOf(id) {
     </div>
 
     <!-- REVEALED -------------------------------------------------- -->
-    <div v-else-if="phase === 'revealed'" class="stage">
+    <div v-else-if="phase === 'revealed' && !pendingDecision" class="stage">
       <div class="reveal">
         <div v-for="p in game.players" :key="p.id" class="revealed-line">
           <strong>{{ p.name }}</strong>
@@ -388,7 +482,7 @@ function nameOf(id) {
     </div>
 
     <!-- RESOLVING ------------------------------------------------- -->
-    <div v-else-if="phase === 'resolving'" class="stage">
+    <div v-else-if="phase === 'resolving' && !pendingDecision" class="stage">
       <p class="muted small">
         Resolving {{ round.resolvedCount }} of {{ round.order.length }} &mdash;
         next up <strong>{{ nameOf(round.order[round.resolvedCount]) }}</strong>

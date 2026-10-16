@@ -15,7 +15,9 @@ import {
   advanceRound,
   legalSelections,
   reselectCurrentAction,
+  finishPendingAction,
 } from './actions.js'
+import { resolveChoice } from './effects.js'
 
 /** A game with hands drawn and round 1 open. */
 function opened(seed = 'actions') {
@@ -329,15 +331,6 @@ describe('what is not legal yet', () => {
     expect(result.reason).toMatch(/not in your hand/i)
   })
 
-  it('reports Explore as coming later, rather than failing silently', () => {
-    const state = opened()
-    const explore = plant(state, state.players[0], 'explore')
-
-    const exploring = selectAction(state, 'p0', { kind: 'card', uid: explore.uid, mode: 'effect' })
-    expect(exploring.ok).toBe(false)
-    expect(exploring.reason).toMatch(/phase 5/i)
-  })
-
   it('rejects Work with no target, and unknown targets', () => {
     const state = opened()
     const gather = plant(state, state.players[0], 'gather')
@@ -387,9 +380,9 @@ describe('legal selections', () => {
 
     expect(legal).toHaveLength(3)
     expect(legal.find((s) => s.cardId === 'recover').available).toBe(true)
-    expect(legal.find((s) => s.cardId === 'explore').available).toBe(false)
-    expect(legal.find((s) => s.cardId === 'explore').reason).toMatch(/phase 5/i)
+    expect(legal.find((s) => s.cardId === 'explore').available).toBe(true)
     expect(legal.find((s) => s.cardId === 'fear').available).toBe(false)
+    expect(legal.find((s) => s.cardId === 'fear').reason).toMatch(/fear/i)
   })
 })
 
@@ -682,5 +675,90 @@ describe('an action that cannot resolve', () => {
   it('refuses when nothing is being resolved', () => {
     const state = opened()
     expect(reselectCurrentAction(state, 'x').ok).toBe(false)
+  })
+})
+
+describe('actions that open a decision', () => {
+  /** Puts a Location with a Danger on top of the deck. */
+  function stackDanger(state) {
+    state.locations.deck = [
+      'dense_forest_strange_noises',
+      ...state.locations.deck.filter((d) => d !== 'dense_forest_strange_noises'),
+    ]
+  }
+
+  function exploreVsRecover(state) {
+    const a = plant(state, state.players[0], 'explore')
+    const b = plant(state, state.players[1], 'recover')
+    selectAction(state, 'p0', { kind: 'card', uid: a.uid, mode: 'effect' })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'effect' })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+  }
+
+  it('suspends the round until the decision is answered', () => {
+    const state = opened()
+    stackDanger(state)
+    exploreVsRecover(state)
+
+    const result = resolveNextAction(state)
+
+    expect(result.ok).toBe(true)
+    expect(result.pending).toBe(true)
+    expect(state.pending).not.toBeNull()
+    // The action is not finished, so the round has not moved on.
+    expect(state.round.resolvedCount).toBe(0)
+  })
+
+  it('refuses to finish while the decision is still open', () => {
+    const state = opened()
+    stackDanger(state)
+    exploreVsRecover(state)
+    resolveNextAction(state)
+
+    const early = finishPendingAction(state)
+    expect(early.ok).toBe(false)
+    expect(early.reason).toMatch(/still waiting/i)
+  })
+
+  it('completes the action once answered, and the round carries on', () => {
+    const state = opened()
+    stackDanger(state)
+    exploreVsRecover(state)
+    resolveNextAction(state)
+
+    resolveChoice(state, 1) // take the Fear
+    expect(state.pending).toBeNull()
+
+    expect(finishPendingAction(state).ok).toBe(true)
+    expect(state.round.resolvedCount).toBe(1)
+
+    expect(resolveNextAction(state).ok).toBe(true)
+    expect(roundComplete(state)).toBe(true)
+  })
+
+  it('completes the round when the decision was on its last action', () => {
+    // The case that stalled the harness: answering a decision finished the
+    // final action, leaving the round complete rather than resolving.
+    const state = opened()
+    stackDanger(state)
+
+    const a = plant(state, state.players[0], 'recover')
+    const b = plant(state, state.players[1], 'explore')
+    selectAction(state, 'p0', { kind: 'card', uid: a.uid, mode: 'effect' })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'effect' })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+
+    resolveNextAction(state)
+    resolveNextAction(state)
+    expect(state.pending).not.toBeNull()
+    expect(roundComplete(state)).toBe(false)
+
+    resolveChoice(state, 1)
+    finishPendingAction(state)
+
+    expect(roundComplete(state)).toBe(true)
+    expect(advanceRound(state).ok).toBe(true)
   })
 })

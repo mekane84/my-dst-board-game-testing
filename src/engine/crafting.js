@@ -10,6 +10,7 @@ import { logEvent } from './setup.js'
 import { GEAR_BY_ID } from '../data/gear.js'
 import { BUILDABLE_BY_ID, MAJOR_IDS } from '../data/campImprovements.js'
 import { createGearCard, findReadyGear, useGear, removeFear } from './gear.js'
+import { transplantableGroves } from './locations.js'
 
 const ok = (extra = {}) => ({ ok: true, ...extra })
 const fail = (reason) => ({ ok: false, reason })
@@ -117,10 +118,11 @@ export function buildStructure(state, player, buildId, options = {}) {
     return fail(`You need a Ready ${needed}.`)
   }
 
+  let grove = null
   if (build.requiresTransplantSlot) {
-    // Transplant slots live on explored Berry Groves, which need Phase 5.
     const slot = findTransplantSlot(state, options.locationId)
     if (!slot.ok) return slot
+    grove = slot.grove
   }
 
   const missing = missingFor(state, build.cost)
@@ -136,7 +138,15 @@ export function buildStructure(state, player, buildId, options = {}) {
       builtOnDay: state.day,
       /** null means harvestable now; a Day number means resting until then. */
       availableOnDay: null,
-      sourceLocationId: options.locationId ?? null,
+      sourceLocationId: grove?.id ?? options.locationId ?? null,
+    })
+  }
+
+  // One transplant per Grove, ever.
+  if (grove) {
+    grove.transplantUsed = true
+    logEvent(state, 'transplant', `${grove.name} has given up its transplant.`, {
+      locationId: grove.id,
     })
   }
 
@@ -158,16 +168,20 @@ export function buildStructure(state, player, buildId, options = {}) {
   return ok()
 }
 
+/**
+ * Finds a Berry Grove that can still be transplanted from.
+ *
+ * Each Grove supports exactly one transplant, ever, so the slot is consumed
+ * by the build rather than being a per-Day allowance.
+ */
 function findTransplantSlot(state, locationId) {
-  const explored = state.locations.explored ?? []
-  if (explored.length === 0) {
-    return fail('Transplanting needs an explored Berry Grove, which arrives in Phase 5.')
+  const groves = transplantableGroves(state)
+  if (groves.length === 0) {
+    return fail('No explored Berry Grove has an unused transplant opportunity.')
   }
 
-  const grove = explored.find(
-    (l) => (locationId ? l.id === locationId : true) && l.transplantSlots > 0 && !l.transplantUsed,
-  )
-  if (!grove) return fail('No explored Berry Grove has an unused transplant opportunity.')
+  const grove = locationId ? groves.find((l) => l.id === locationId) : groves[0]
+  if (!grove) return fail('That Berry Grove cannot be transplanted from.')
   return ok({ grove })
 }
 
