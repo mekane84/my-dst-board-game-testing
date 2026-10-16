@@ -21,6 +21,7 @@ import { readyGearById, useGear } from './gear.js'
 import { craftGear, buildStructure } from './crafting.js'
 import { healHealth } from './survivor.js'
 import { exploreLocation, gatherAtLocation, locationOptions } from './locations.js'
+import { harvestFoodSource, foodSourceOptions } from './food.js'
 
 const ok = (extra = {}) => ({ ok: true, ...extra })
 const fail = (reason) => ({ ok: false, reason })
@@ -375,16 +376,25 @@ const HANDLERS = {
      * targeting a Location is rejected with a reason rather than ignored.
      */
     available(state, player, options) {
-      if (options.target !== 'location') return ok()
+      if (options.target === 'location') {
+        const choice = locationOptions(state, player).find((l) => l.id === options.locationId)
+        if (!choice) return fail('That Location has not been explored.')
+        return choice.available ? ok() : fail(choice.reason)
+      }
 
-      const choice = locationOptions(state, player).find((l) => l.id === options.locationId)
-      if (!choice) return fail('That Location has not been explored.')
-      return choice.available ? ok() : fail(choice.reason)
+      if (options.target === 'food') {
+        const choice = foodSourceOptions(state).find((f) => f.uid === options.foodUid)
+        if (!choice) return fail('No such food source at Camp.')
+        return choice.available ? ok() : fail(choice.reason)
+      }
+
+      return ok()
     },
     options(state, player) {
       return {
         campResources: [...state.constants.gather.campResources],
         locations: locationOptions(state, player),
+        foodSources: foodSourceOptions(state),
       }
     },
     resolve(state, player, options) {
@@ -393,6 +403,11 @@ const HANDLERS = {
       if (options.target === 'location') {
         if (!options.locationId) return fail('Choose a Location to gather from.')
         return gatherAtLocation(state, player, options.locationId, { gearUid: options.gearUid })
+      }
+
+      if (options.target === 'food') {
+        if (!options.foodUid) return fail('Choose a food source to harvest.')
+        return harvestFoodSource(state, player, options.foodUid)
       }
 
       if (!options.resource) return fail('Choose a resource to gather at Camp.')

@@ -11,6 +11,7 @@ import { GEAR_BY_ID } from '../data/gear.js'
 import { BUILDABLE_BY_ID } from '../data/campImprovements.js'
 import { majorImprovementCount } from '../engine/crafting.js'
 import { LOCATIONS_BY_ID } from '../data/locations.js'
+import { foodSourceOptions } from '../engine/food.js'
 import ActionRound from './ActionRound.vue'
 
 /**
@@ -108,7 +109,7 @@ const camp = computed(() => {
   return {
     major: Object.keys(g.camp.improvements).map((id) => BUILDABLE_BY_ID[id]?.name ?? id),
     majorCount: majorImprovementCount(g),
-    food: g.camp.foodSources.map((f) => BUILDABLE_BY_ID[f.id]?.name ?? f.id),
+    food: foodSourceOptions(g),
   }
 })
 
@@ -279,7 +280,13 @@ function exportState() {
         <div class="row">
           <span class="tag">food</span>
           <span v-if="!camp.food.length" class="muted small">none built</span>
-          <span v-for="(name, i) in camp.food" :key="i" class="card food">{{ name }}</span>
+          <span
+            v-for="f in camp.food"
+            :key="f.uid"
+            class="card food"
+            :class="{ resting: !f.available }"
+            :title="f.reason || 'ready to harvest'"
+          >{{ f.name }} +{{ f.yield }}<span v-if="!f.available" class="rest">resting</span></span>
         </div>
 
         <h2 class="spaced">Night schedule</h2>
@@ -411,6 +418,11 @@ tr.current td { background: #262a33; }
 .card.broken { color: #8a6a66; text-decoration: line-through; }
 .card.major { color: var(--accent); border-color: #5a4426; }
 .card.food { color: var(--good); border-color: #3f5436; }
+.card.food.resting { color: #d6c88f; border-color: #4e4731; }
+.rest {
+  margin-left: 0.3rem; font-size: 0.6rem; text-transform: uppercase;
+  letter-spacing: 0.06em; opacity: 0.8;
+}
 
 .mini { padding: 0.1rem 0.35rem; font-size: 0.68rem; }
 .playable { font-size: 0.72rem; color: var(--good); margin-top: 0.2rem; }

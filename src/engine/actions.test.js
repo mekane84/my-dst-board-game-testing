@@ -18,6 +18,7 @@ import {
   finishPendingAction,
 } from './actions.js'
 import { resolveChoice } from './effects.js'
+import { buildStructure } from './crafting.js'
 
 /** A game with hands drawn and round 1 open. */
 function opened(seed = 'actions') {
@@ -760,5 +761,60 @@ describe('actions that open a decision', () => {
 
     expect(roundComplete(state)).toBe(true)
     expect(advanceRound(state).ok).toBe(true)
+  })
+})
+
+describe('Gather can target Camp food infrastructure', () => {
+  function withFarm(state) {
+    Object.assign(state.resources, { wood: 2, grass: 3, flint: 1 })
+    buildStructure(state, state.players[0], 'simple_farm')
+    state.resources.food = 0
+    return state.camp.foodSources.at(-1)
+  }
+
+  it('harvests a built Farm', () => {
+    const state = opened()
+    const plot = withFarm(state)
+
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+    playRound(state, {
+      p0: { kind: 'card', uid: a.uid, mode: 'effect', options: { target: 'food', foodUid: plot.uid } },
+      p1: { kind: 'card', uid: b.uid, mode: 'effect' },
+    })
+
+    expect(state.resources.food).toBe(3)
+  })
+
+  it('refuses a food source that is resting', () => {
+    const state = opened()
+    const plot = withFarm(state)
+    plot.availableOnDay = 99
+
+    const a = plant(state, state.players[0], 'gather')
+    const result = selectAction(state, 'p0', {
+      kind: 'card', uid: a.uid, mode: 'effect', options: { target: 'food', foodUid: plot.uid },
+    })
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/resting/i)
+  })
+
+  it('still refuses Food from a plain Camp Gather', () => {
+    const state = opened()
+    const a = plant(state, state.players[0], 'gather')
+    const b = plant(state, state.players[1], 'recover')
+
+    selectAction(state, 'p0', {
+      kind: 'card', uid: a.uid, mode: 'effect', options: { resource: 'food' },
+    })
+    selectAction(state, 'p1', { kind: 'card', uid: b.uid, mode: 'effect' })
+    revealSelections(state)
+    setResolutionOrder(state, ['p0', 'p1'])
+
+    const result = resolveNextAction(state)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toMatch(/cannot be gathered at camp/i)
+    expect(state.resources.food).toBe(0)
   })
 })

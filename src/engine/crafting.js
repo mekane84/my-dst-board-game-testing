@@ -133,9 +133,15 @@ export function buildStructure(state, player, buildId, options = {}) {
   if (build.family === 'major') {
     state.camp.improvements[buildId] = { id: buildId, builtOnDay: state.day }
   } else {
+    // A unique id matters because a team may own several Farms, and they
+    // rest independently.
+    state.cardCounter += 1
     state.camp.foodSources.push({
+      uid: `food${state.cardCounter}`,
       id: buildId,
       builtOnDay: state.day,
+      /** Day it was last harvested, for display. */
+      harvestedOnDay: null,
       /** null means harvestable now; a Day number means resting until then. */
       availableOnDay: null,
       sourceLocationId: grove?.id ?? options.locationId ?? null,

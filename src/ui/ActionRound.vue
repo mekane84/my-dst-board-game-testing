@@ -16,6 +16,7 @@ import {
 } from '../engine/actions.js'
 import { resolveChoice, resolveTake } from '../engine/effects.js'
 import { locationOptions } from '../engine/locations.js'
+import { foodSourceOptions } from '../engine/food.js'
 import { LOCATIONS_BY_ID } from '../data/locations.js'
 import PendingDecision from './PendingDecision.vue'
 import { workOptions } from '../engine/crafting.js'
@@ -117,6 +118,17 @@ function effectChoices(player, entry) {
           options: { resource, gearUid: mod.uid },
         })
       }
+    }
+
+    // Camp food infrastructure -- the only renewable Food at Camp, since
+    // Camp Gather itself can never produce any.
+    for (const food of foodSourceOptions(props.game)) {
+      rows.push({
+        label: `${food.name} (+${food.yield} food)`,
+        options: { target: 'food', foodUid: food.uid },
+        available: food.available,
+        reason: food.reason,
+      })
     }
 
     // Explored Locations, each carrying why it is unavailable if it is.
